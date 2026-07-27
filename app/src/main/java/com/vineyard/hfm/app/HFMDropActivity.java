@@ -35,6 +35,7 @@ import com.google.firebase.auth.AuthResult;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.DocumentChange;
+import com.google.firebase.firestore.DocumentReference;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.EventListener;
 import com.google.firebase.firestore.FirebaseFirestore;
@@ -50,8 +51,9 @@ import java.util.Map;
 
 /**
  * Activity for listening to and accepting incoming HFM Drop requests.
- * DYNAMIC BYPASS:
- * - Redirects all Firestore queries and updates directly to the secondary named app instance ("client_hfm_app").
+ * INTEGRATED CONTROL CENTER:
+ * - Redirects all Firestore queries and updates directly to secondary "client_hfm_app" instance.
+ * - Provides inline setup options (Upload JSON, My QR Code, Scan QR Code) directly inside the HFM Drop feature.
  */
 public class HFMDropActivity extends Activity {
 
@@ -88,7 +90,7 @@ public class HFMDropActivity extends Activity {
         setContentView(R.layout.activity_hfm_drop);
 
         initializeViews();
-        initializeFirebase();
+        checkAndInitializeSetup();
         setupRecyclerView();
         setupListeners();
         setupBroadcastReceiver();
@@ -116,6 +118,47 @@ public class HFMDropActivity extends Activity {
         requestsRecyclerView = findViewById(R.id.requests_recycler_view);
         loadingRequestsProgress = findViewById(R.id.loading_requests_progress);
         emptyViewRequests = findViewById(R.id.empty_view_requests);
+    }
+
+    /**
+     * Checks if Client Firebase setup is done.
+     * If missing, prompts the user with options to configure as Sender or Scan QR as Receiver.
+     */
+    private void checkAndInitializeSetup() {
+        EncryptionHelper encryptionHelper = EncryptionHelper.getInstance(this);
+        if (!encryptionHelper.isSetupDone()) {
+            showInlineSetupDialog();
+        } else {
+            initializeFirebase();
+        }
+    }
+
+    private void showInlineSetupDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("HFM Drop Network Required")
+                .setMessage("Choose how you want to connect to HFM Messenger Drop:")
+                .setCancelable(true)
+                .setPositiveButton("Setup Network (Sender)", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        Intent intent = new Intent(HFMDropActivity.this, ClientSetupActivity.class);
+                        startActivity(intent);
+                    }
+                })
+                .setNegativeButton("Scan QR Code (Receiver)", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        Intent intent = new Intent(HFMDropActivity.this, ClientQrScanActivity.class);
+                        startActivity(intent);
+                    }
+                })
+                .setNeutralButton("Cancel", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        dialog.dismiss();
+                    }
+                })
+                .show();
     }
 
     /**
@@ -162,17 +205,7 @@ public class HFMDropActivity extends Activity {
         regenerateIdButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                new AlertDialog.Builder(HFMDropActivity.this)
-                        .setTitle("Regenerate ID")
-                        .setMessage("Are you sure? This will permanently delete your current ID and any pending requests. This action cannot be undone.")
-                        .setPositiveButton("Regenerate", new DialogInterface.OnClickListener() {
-                            @Override
-                            public void onClick(DialogInterface dialog, int which) {
-                                regenerateIdentity();
-                            }
-                        })
-                        .setNegativeButton("Cancel", null)
-                        .show();
+                showNetworkOptionsMenu();
             }
         });
 
@@ -183,6 +216,51 @@ public class HFMDropActivity extends Activity {
                 startActivity(intent);
             }
         });
+    }
+
+    /**
+     * Shows full network options menu for Setup, My QR Code, and Scan QR Code.
+     */
+    private void showNetworkOptionsMenu() {
+        final CharSequence[] options = {
+                "Setup / Change Network (Upload JSON)",
+                "Show My Network QR Code (Option A)",
+                "Scan QR Code to Receive (Option B)",
+                "Regenerate Session ID",
+                "Cancel"
+        };
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("HFM Drop Network Options");
+        builder.setItems(options, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                switch (which) {
+                    case 0:
+                        startActivity(new Intent(HFMDropActivity.this, ClientSetupActivity.class));
+                        break;
+                    case 1:
+                        if (EncryptionHelper.getInstance(HFMDropActivity.this).isSetupDone()) {
+                            Intent intent = new Intent(HFMDropActivity.this, ClientQrGenerateActivity.class);
+                            intent.putExtra(ClientQrGenerateActivity.EXTRA_MODE, ClientQrGenerateActivity.MODE_NETWORK);
+                            startActivity(intent);
+                        } else {
+                            Toast.makeText(HFMDropActivity.this, "Please setup your network first.", Toast.LENGTH_SHORT).show();
+                        }
+                        break;
+                    case 2:
+                        startActivity(new Intent(HFMDropActivity.this, ClientQrScanActivity.class));
+                        break;
+                    case 3:
+                        regenerateIdentity();
+                        break;
+                    default:
+                        dialog.dismiss();
+                        break;
+                }
+            }
+        });
+        builder.show();
     }
 
     private void setupBroadcastReceiver() {
@@ -221,15 +299,23 @@ public class HFMDropActivity extends Activity {
     }
 
     private void checkCurrentUser() {
-        currentUser = mAuth.getCurrentUser();
-        if (currentUser == null) {
-            signInAnonymously();
-        } else {
-            updateUiWithUser(currentUser);
+        if (mAuth == null) {
+            initializeFirebase();
+        }
+
+        if (mAuth != null) {
+            currentUser = mAuth.getCurrentUser();
+            if (currentUser == null) {
+                signInAnonymously();
+            } else {
+                updateUiWithUser(currentUser);
+            }
         }
     }
 
     private void signInAnonymously() {
+        if (mAuth == null) return;
+
         usernameTextView.setText("Generating ID...");
         regenerateIdButton.setEnabled(false);
         mAuth.signInAnonymously().addOnCompleteListener(this, new OnCompleteListener<AuthResult>() {
@@ -288,6 +374,8 @@ public class HFMDropActivity extends Activity {
 
     private void listenForDropRequests(String username) {
         removeListener();
+        if (db == null) return;
+
         loadingRequestsProgress.setVisibility(View.VISIBLE);
         requestsRecyclerView.setVisibility(View.GONE);
         emptyViewRequests.setVisibility(View.GONE);
@@ -306,11 +394,13 @@ public class HFMDropActivity extends Activity {
                     return;
                 }
 
-                for (DocumentChange dc : snapshots.getDocumentChanges()) {
-                    if (dc.getType() == DocumentChange.Type.ADDED) {
-                        DropRequest request = dc.getDocument().toObject(DropRequest.class);
-                        request.id = dc.getDocument().getId();
-                        requestList.add(request);
+                if (snapshots != null) {
+                    for (DocumentChange dc : snapshots.getDocumentChanges()) {
+                        if (dc.getType() == DocumentChange.Type.ADDED) {
+                            DropRequest request = dc.getDocument().toObject(DropRequest.class);
+                            request.id = dc.getDocument().getId();
+                            requestList.add(request);
+                        }
                     }
                 }
 
@@ -363,6 +453,8 @@ public class HFMDropActivity extends Activity {
     }
 
     private void proceedWithAccept(final DropRequest request, final String secretNumber) {
+        if (db == null) return;
+
         Map<String, Object> updates = new HashMap<>();
         updates.put("status", "accepted");
         updates.put("receiverId", currentUser.getUid());
@@ -399,6 +491,8 @@ public class HFMDropActivity extends Activity {
     }
 
     private void handleDecline(DropRequest request) {
+        if (db == null) return;
+
         Map<String, Object> updates = new HashMap<>();
         updates.put("status", "declined");
         db.collection("drop_requests").document(request.id).update(updates);
