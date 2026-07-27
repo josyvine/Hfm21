@@ -63,25 +63,19 @@
         android:requestLegacyExternalStorage="true"
         android:preserveLegacyExternalStorage="true">
 
-        <!-- Splash Setup Launcher Activity -->
+        <!-- RESTORED PRIMARY LAUNCHER ACTIVITY -->
         <activity
-            android:name=".SplashSetupActivity"
+            android:name=".MainActivity"
             android:configChanges="orientation|screenSize"
             android:exported="true"
-            android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+            android:theme="@style/AppTheme.MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".MainActivity"
-            android:configChanges="orientation|screenSize"
-            android:exported="false"
-            android:theme="@style/AppTheme.MainActivity" />
-
-        <!-- SETUP & QR CODE ACTIVITIES -->
+        <!-- SETUP & QR CODE ACTIVITIES (ACCESSED FROM HFM DROP) -->
         <activity
             android:name=".ClientSetupActivity"
             android:label="Configure Network"
