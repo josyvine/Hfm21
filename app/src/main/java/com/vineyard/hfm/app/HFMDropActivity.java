@@ -30,11 +30,11 @@ import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.Task;
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.auth.AuthResult;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.DocumentChange;
-import com.google.firebase.firestore.DocumentReference;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.EventListener;
 import com.google.firebase.firestore.FirebaseFirestore;
@@ -48,6 +48,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Activity for listening to and accepting incoming HFM Drop requests.
+ * DYNAMIC BYPASS:
+ * - Redirects all Firestore queries and updates directly to the secondary named app instance ("client_hfm_app").
+ */
 public class HFMDropActivity extends Activity {
 
     private static final String TAG = "HFMDropActivity";
@@ -56,7 +61,7 @@ public class HFMDropActivity extends Activity {
     private ImageButton backButton;
     private TextView usernameTextView;
     private Button regenerateIdButton;
-    private Button openVaultButton; // NEW
+    private Button openVaultButton;
     private RecyclerView requestsRecyclerView;
     private ProgressBar loadingRequestsProgress;
     private TextView emptyViewRequests;
@@ -107,15 +112,26 @@ public class HFMDropActivity extends Activity {
         backButton = findViewById(R.id.back_button_hfm_drop);
         usernameTextView = findViewById(R.id.username_text_view);
         regenerateIdButton = findViewById(R.id.regenerate_id_button);
-        openVaultButton = findViewById(R.id.open_vault_button); // NEW
+        openVaultButton = findViewById(R.id.open_vault_button);
         requestsRecyclerView = findViewById(R.id.requests_recycler_view);
         loadingRequestsProgress = findViewById(R.id.loading_requests_progress);
         emptyViewRequests = findViewById(R.id.empty_view_requests);
     }
 
+    /**
+     * Initializes Firebase to read/write directly from the Client Secondary App instance ("client_hfm_app").
+     */
     private void initializeFirebase() {
-        mAuth = FirebaseAuth.getInstance();
-        db = FirebaseFirestore.getInstance();
+        try {
+            FirebaseApp clientApp = FirebaseApp.getInstance(FirebaseManager.CLIENT_APP_NAME);
+            mAuth = FirebaseAuth.getInstance(clientApp);
+            db = FirebaseFirestore.getInstance(clientApp);
+            Log.d(TAG, "Connected successfully to secondary Client Firestore instance.");
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Secondary client app not initialized. Falling back to default instance.", e);
+            mAuth = FirebaseAuth.getInstance();
+            db = FirebaseFirestore.getInstance();
+        }
     }
 
     private void setupRecyclerView() {
@@ -160,7 +176,6 @@ public class HFMDropActivity extends Activity {
             }
         });
 
-        // NEW: Listener to open the Vault Browser
         openVaultButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -205,7 +220,6 @@ public class HFMDropActivity extends Activity {
         dialog.show();
     }
 
-
     private void checkCurrentUser() {
         currentUser = mAuth.getCurrentUser();
         if (currentUser == null) {
@@ -222,12 +236,12 @@ public class HFMDropActivity extends Activity {
             @Override
             public void onComplete(@NonNull Task<AuthResult> task) {
                 if (task.isSuccessful()) {
-                    Log.d(TAG, "signInAnonymously:success");
+                    Log.d(TAG, "signInAnonymously on client DB: success");
                     currentUser = mAuth.getCurrentUser();
                     updateUiWithUser(currentUser);
                 } else {
-                    Log.w(TAG, "signInAnonymously:failure", task.getException());
-                    Toast.makeText(HFMDropActivity.this, "Authentication failed.", Toast.LENGTH_SHORT).show();
+                    Log.w(TAG, "signInAnonymously on client DB: failure", task.getException());
+                    Toast.makeText(HFMDropActivity.this, "Authentication failed on Client Database.", Toast.LENGTH_SHORT).show();
                     usernameTextView.setText("Authentication Failed");
                 }
             }
@@ -243,10 +257,10 @@ public class HFMDropActivity extends Activity {
                 @Override
                 public void onComplete(@NonNull Task<Void> task) {
                     if (task.isSuccessful()) {
-                        Log.d(TAG, "User account deleted.");
+                        Log.d(TAG, "User session deleted from client DB.");
                         signInAnonymously();
                     } else {
-                        Log.w(TAG, "User account deletion failed.", task.getException());
+                        Log.w(TAG, "User session deletion failed.", task.getException());
                         Toast.makeText(HFMDropActivity.this, "Failed to regenerate ID.", Toast.LENGTH_SHORT).show();
                         updateUiWithUser(currentUser);
                     }
@@ -287,8 +301,8 @@ public class HFMDropActivity extends Activity {
             public void onEvent(QuerySnapshot snapshots, FirebaseFirestoreException e) {
                 loadingRequestsProgress.setVisibility(View.GONE);
                 if (e != null) {
-                    Log.w(TAG, "Listen failed.", e);
-                    Toast.makeText(HFMDropActivity.this, "Error listening for requests.", Toast.LENGTH_SHORT).show();
+                    Log.w(TAG, "Listen failed on client DB snapshot.", e);
+                    Toast.makeText(HFMDropActivity.this, "Error listening for requests on secondary database.", Toast.LENGTH_SHORT).show();
                     return;
                 }
 
@@ -325,7 +339,6 @@ public class HFMDropActivity extends Activity {
             return;
         }
 
-        // Create an input dialog for the Secret Number
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("Enter Secret Number");
         builder.setMessage("Please enter the Secret Number provided by the sender to decrypt this transfer:");
@@ -358,11 +371,11 @@ public class HFMDropActivity extends Activity {
                 .addOnSuccessListener(new OnSuccessListener<Void>() {
                     @Override
                     public void onSuccess(Void aVoid) {
-                        Log.d(TAG, "Drop request accepted. Starting download service.");
+                        Log.d(TAG, "Drop request accepted on client DB. Starting download service.");
 
                         Intent serviceIntent = new Intent(HFMDropActivity.this, DownloadService.class);
                         serviceIntent.putExtra("drop_request_id", request.id);
-                        serviceIntent.putExtra("secret_number", secretNumber); // Pass the PIN to the Service
+                        serviceIntent.putExtra("secret_number", secretNumber);
                         ContextCompat.startForegroundService(HFMDropActivity.this, serviceIntent);
 
                         Intent progressIntent = new Intent(HFMDropActivity.this, DropProgressActivity.class);
@@ -373,7 +386,7 @@ public class HFMDropActivity extends Activity {
                 .addOnFailureListener(new OnFailureListener() {
                     @Override
                     public void onFailure(@NonNull Exception e) {
-                        Log.e(TAG, "Failed to accept drop request", e);
+                        Log.e(TAG, "Failed to accept drop request on client DB", e);
                         Toast.makeText(HFMDropActivity.this, "Failed to accept request: " + e.getMessage(), Toast.LENGTH_SHORT).show();
                     }
                 });
@@ -384,7 +397,6 @@ public class HFMDropActivity extends Activity {
             emptyViewRequests.setVisibility(View.VISIBLE);
         }
     }
-
 
     private void handleDecline(DropRequest request) {
         Map<String, Object> updates = new HashMap<>();
@@ -405,7 +417,7 @@ public class HFMDropActivity extends Activity {
         public String originalFilename;
         public long filesize;
         public String status;
-        public String encryptedManifestId; // Replaced magnetLink
+        public String encryptedManifestId;
 
         public DropRequest() {}
     }
@@ -437,7 +449,7 @@ public class HFMDropActivity extends Activity {
         public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
             final DropRequest request = requestList.get(position);
 
-            holder.filename.setText(request.originalFilename); // Use original filename for UI
+            holder.filename.setText(request.originalFilename);
             holder.senderInfo.setText("From: " + request.senderUsername);
             holder.filesize.setText("Size: " + Formatter.formatFileSize(context, request.filesize));
 
@@ -479,4 +491,4 @@ public class HFMDropActivity extends Activity {
             }
         }
     }
-} 
+}
