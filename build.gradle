@@ -8,7 +8,7 @@ buildscript {
     dependencies {
         // Upgrade the Android Gradle Plugin to a version compatible with modern libraries and SDK 34.
         classpath 'com.android.tools.build:gradle:8.1.4'
-        
+
         // REMOVED: classpath 'com.google.gms:google-services:4.4.1'
         // Removed because HFM uses Dynamic Runtime Initialization (FirebaseManager) 
         // instead of the static build-time plugin binding.
@@ -19,7 +19,7 @@ allprojects {
     repositories {
         // Ensure all parts of the project use the modern repositories.
         google()
-        mavenCentral;
+        mavenCentral()
         maven { url "https://jitpack.io" }
     }
 }
