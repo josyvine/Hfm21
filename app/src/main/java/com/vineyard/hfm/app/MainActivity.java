@@ -7,11 +7,11 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
-import android.net.Uri;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -25,43 +25,39 @@ import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
-// Google Drive Imports Added Here
 import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
 import com.google.android.gms.auth.api.signin.GoogleSignInClient;
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
 import com.google.android.gms.common.api.ApiException;
 import com.google.android.gms.common.api.Scope;
-import com.google.api.services.drive.DriveScopes;
-
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
+import com.google.api.services.drive.DriveScopes;
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.auth.AuthCredential;
 import com.google.firebase.auth.AuthResult;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.auth.GoogleAuthProvider;
 
-import org.json.JSONException;
-
-import java.io.File;
-import java.io.Serializable;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
 
 public class MainActivity extends Activity {
+
     private static final String TAG = "HFM_MainActivity";
     private static final int STORAGE_PERMISSION_REQUEST_CODE = 456;
     private static final int NOTIFICATION_PERMISSION_REQUEST_CODE = 457;
     private static final int DROP_FILE_PICKER_REQUEST_CODE = 999;
-    
-    // New variable for Google Drive Request Code
     private static final int GOOGLE_DRIVE_SIGNIN_REQUEST_CODE = 1001;
 
     private WebView webView;
-    private FirebaseAuth mAuth;
+    private FirebaseAuth mCentralAuth;
     private ArrayList<String> filesToSendViaDrop;
-
-    // New variable for Google Drive
     private GoogleSignInClient googleSignInClient;
 
     @Override
@@ -69,9 +65,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // FIX: Launch DashboardActivity ONLY on initial app cold start (savedInstanceState == null).
-        // This prevents Vivo's aggressive background RAM manager from re-launching DashboardActivity
-        // when MainActivity is recreated during search or mass delete operations.
+        // Cold start check for Dashboard Activity
         if (savedInstanceState == null) {
             startActivity(new Intent(this, DashboardActivity.class));
         }
@@ -88,15 +82,13 @@ public class MainActivity extends Activity {
         }
         webView.addJavascriptInterface(new WebAppInterface(this), "Android");
 
-        mAuth = FirebaseAuth.getInstance();
+        // Central Auth Instance (Points to Developer's [DEFAULT] App)
+        mCentralAuth = FirebaseAuth.getInstance();
 
-        // Initialize Google Drive Auth
         setupGoogleDriveAuth();
-
         requestFilePermissions();
-        signInAnonymously();
+        checkAndAuthenticateUser();
 
-        // FIX: Restore WebView state if activity was recreated, otherwise load URL on initial launch
         if (savedInstanceState != null) {
             webView.restoreState(savedInstanceState);
         } else {
@@ -104,7 +96,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    // FIX: Save WebView state during activity lifecycle pause/recreation
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
@@ -122,16 +113,19 @@ public class MainActivity extends Activity {
         }
     }
 
-    // New Method for Google Drive
+    /**
+     * Configures Google Sign-In pointing strictly to CentralConfig.WEB_CLIENT_ID
+     * to ensure SHA-1 verification is handled on the Central Developer Project.
+     */
     private void setupGoogleDriveAuth() {
         GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestIdToken(CentralConfig.WEB_CLIENT_ID)
                 .requestEmail()
-                .requestScopes(new Scope(DriveScopes.DRIVE)) // CHANGED: DRIVE_FILE to DRIVE
+                .requestScopes(new Scope(DriveScopes.DRIVE))
                 .build();
         googleSignInClient = GoogleSignIn.getClient(this, gso);
     }
 
-    // New Method for Google Drive
     private void updateWebViewDriveStatus(final boolean isLoggedIn) {
         runOnUiThread(new Runnable() {
             @Override
@@ -143,28 +137,80 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void signInAnonymously() {
-        FirebaseUser currentUser = mAuth.getCurrentUser();
-        if (currentUser == null) {
-            mAuth.signInAnonymously()
-                .addOnCompleteListener(this, new OnCompleteListener<AuthResult>() {
-                    @Override
-                    public void onComplete(@NonNull Task<AuthResult> task) {
-                        if (task.isSuccessful()) {
-                            Log.d(TAG, "signInAnonymously:success");
-                        } else {
-                            Log.w(TAG, "signInAnonymously:failure", task.getException());
-                            Toast.makeText(MainActivity.this, "Anonymous authentication failed.", Toast.LENGTH_SHORT).show();
-                        }
-                    }
-                });
+    /**
+     * Verifies central authentication and executes the Silent Auth Bridge to the Client database.
+     */
+    private void checkAndAuthenticateUser() {
+        FirebaseUser currentUser = mCentralAuth.getCurrentUser();
+        if (currentUser != null) {
+            authenticateSecondaryApp(currentUser);
         } else {
-            Log.d(TAG, "User already signed in anonymously with UID: " + currentUser.getUid());
+            Log.d(TAG, "Central Auth session empty. Waiting for user login or Drive sign-in.");
+        }
+    }
+
+    /**
+     * Silently authenticates the user on the secondary Client database ("client_hfm_app")
+     * using a mathematically derived SHA-256 password hash.
+     */
+    private void authenticateSecondaryApp(FirebaseUser centralUser) {
+        try {
+            FirebaseApp clientApp = FirebaseApp.getInstance(FirebaseManager.CLIENT_APP_NAME);
+            FirebaseAuth clientAuth = FirebaseAuth.getInstance(clientApp);
+
+            String email = centralUser.getEmail();
+            String centralUid = centralUser.getUid();
+
+            if (email == null || email.isEmpty()) {
+                Log.w(TAG, "User email missing from central Google identity.");
+                return;
+            }
+
+            String derivedPassword = calculateSecurePassword(email, centralUid);
+
+            // Attempt silent login
+            clientAuth.signInWithEmailAndPassword(email, derivedPassword)
+                    .addOnCompleteListener(task -> {
+                        if (task.isSuccessful()) {
+                            Log.d(TAG, "Silent Email/Password sign-in successful on client database.");
+                        } else {
+                            // Register account silently if it doesn't exist on Client database yet
+                            Log.d(TAG, "Client account does not exist. Creating silent secondary account.");
+                            clientAuth.createUserWithEmailAndPassword(email, derivedPassword)
+                                    .addOnCompleteListener(createTask -> {
+                                        if (createTask.isSuccessful()) {
+                                            Log.d(TAG, "Silent secondary user registration complete.");
+                                        } else {
+                                            Log.e(TAG, "Failed silent registration on client database.", createTask.getException());
+                                        }
+                                    });
+                        }
+                    });
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Secondary client app not mounted yet.", e);
+        }
+    }
+
+    private String calculateSecurePassword(String email, String centralUid) {
+        try {
+            String input = email + centralUid + "HfmSecurePasswordSalt2026";
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
+            }
+            return hexString.toString().substring(0, 16);
+        } catch (Exception e) {
+            Log.e(TAG, "Password hash calculation error", e);
+            return "HfmFallbackPass123!";
         }
     }
 
     private void requestFilePermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) { // Android 11+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
                 try {
                     Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
@@ -172,21 +218,20 @@ public class MainActivity extends Activity {
                     intent.setData(Uri.parse(String.format("package:%s", getApplicationContext().getPackageName())));
                     startActivityForResult(intent, STORAGE_PERMISSION_REQUEST_CODE);
                 } catch (Exception e) {
-                    Intent intent = new Intent();
-                    intent.setAction(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                    Intent intent = new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
                     startActivityForResult(intent, STORAGE_PERMISSION_REQUEST_CODE);
                 }
             } else {
                 requestNotificationPermission();
             }
-        } else { // Android 10 and below (e.g., Huawei Nova 7 SE / EMUI 10.1 API 29)
+        } else {
             boolean readGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
             boolean writeGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
 
             if (!readGranted || !writeGranted) {
-                ActivityCompat.requestPermissions(this, 
-                    new String[]{Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE}, 
-                    STORAGE_PERMISSION_REQUEST_CODE);
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE},
+                        STORAGE_PERMISSION_REQUEST_CODE);
             } else {
                 requestNotificationPermission();
             }
@@ -209,7 +254,7 @@ public class MainActivity extends Activity {
                 if (Environment.isExternalStorageManager()) {
                     requestNotificationPermission();
                 } else {
-                    Toast.makeText(this, "All Files Access permission is required for the app to function correctly.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "All Files Access permission is required.", Toast.LENGTH_LONG).show();
                 }
             }
         } else if (requestCode == DROP_FILE_PICKER_REQUEST_CODE && resultCode == Activity.RESULT_OK) {
@@ -219,19 +264,24 @@ public class MainActivity extends Activity {
                     showSendToDropDialog();
                 }
             }
-        } 
-        // --- NEW GOOGLE DRIVE RESULT LOGIC ADDED HERE ---
-        else if (requestCode == GOOGLE_DRIVE_SIGNIN_REQUEST_CODE) {
+        } else if (requestCode == GOOGLE_DRIVE_SIGNIN_REQUEST_CODE) {
             if (resultCode == Activity.RESULT_OK && data != null) {
                 Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
                 try {
                     GoogleSignInAccount account = task.getResult(ApiException.class);
-                    // CHANGED: DRIVE_FILE to DRIVE
+                    if (account != null && account.getIdToken() != null) {
+                        // Perform Central Firebase authentication using Google Credential
+                        AuthCredential credential = GoogleAuthProvider.getCredential(account.getIdToken(), null);
+                        mCentralAuth.signInWithCredential(credential).addOnCompleteListener(authTask -> {
+                            if (authTask.isSuccessful() && mCentralAuth.getCurrentUser() != null) {
+                                authenticateSecondaryApp(mCentralAuth.getCurrentUser());
+                            }
+                        });
+                    }
                     if (account != null && GoogleSignIn.hasPermissions(account, new Scope(DriveScopes.DRIVE))) {
                         Toast.makeText(this, "Google Drive Connected!", Toast.LENGTH_SHORT).show();
                         updateWebViewDriveStatus(true);
                     } else {
-                        // CHANGED: DRIVE_FILE to DRIVE
                         GoogleSignIn.requestPermissions(this, GOOGLE_DRIVE_SIGNIN_REQUEST_CODE, account, new Scope(DriveScopes.DRIVE));
                     }
                 } catch (ApiException e) {
@@ -247,7 +297,7 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == STORAGE_PERMISSION_REQUEST_CODE) {
             boolean allGranted = grantResults.length > 0;
@@ -268,7 +318,7 @@ public class MainActivity extends Activity {
             }
         }
     }
-    
+
     private String generateSecretNumber() {
         SecureRandom random = new SecureRandom();
         byte[] bytes = new byte[16];
@@ -301,7 +351,7 @@ public class MainActivity extends Activity {
                 .setNegativeButton("Cancel", null);
         builder.create().show();
     }
-    
+
     private void showSenderWarningDialog(final String receiverUsername) {
         final String secretNumber = generateSecretNumber();
 
@@ -320,10 +370,6 @@ public class MainActivity extends Activity {
             .show();
     }
 
-    /**
-     * FIX: Updated to support multiple files sending using one single PIN.
-     * Iterates through all selected files and starts a SenderService for each.
-     */
     private void startSenderService(String receiverUsername, String secretNumber) {
         if (filesToSendViaDrop == null || filesToSendViaDrop.isEmpty()) {
             Toast.makeText(this, "Error: No file selected to send.", Toast.LENGTH_SHORT).show();
@@ -342,7 +388,6 @@ public class MainActivity extends Activity {
         filesToSendViaDrop = null;
     }
 
-
     public class WebAppInterface {
         Context mContext;
 
@@ -357,14 +402,12 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void openDashboard() {
-            Log.d("HFMApp_WebView", "openDashboard() called. Launching DashboardActivity.");
             Intent intent = new Intent(mContext, DashboardActivity.class);
             mContext.startActivity(intent);
         }
 
         @JavascriptInterface
         public void openSearch() {
-            Log.d("HFMApp_WebView", "openSearch() called. Launching SearchActivity.");
             Intent intent = new Intent(mContext, SearchActivity.class);
             intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
             mContext.startActivity(intent);
@@ -372,7 +415,6 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void openMassDelete() {
-            Log.d("HFMApp_WebView", "openMassDelete() called. Launching MassDeleteActivity.");
             Intent intent = new Intent(mContext, MassDeleteActivity.class);
             intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
             mContext.startActivity(intent);
@@ -380,51 +422,43 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void openRecycleBin() {
-            Log.d("HFMApp_WebView", "openRecycleBin() called. Launching RecycleBinActivity.");
             Intent intent = new Intent(mContext, RecycleBinActivity.class);
             mContext.startActivity(intent);
         }
 
         @JavascriptInterface
         public void openContactForm() {
-            Log.d("HFMApp_WebView", "openContactForm() called. Launching ContactActivity.");
             Intent intent = new Intent(mContext, ContactActivity.class);
             mContext.startActivity(intent);
         }
 
         @JavascriptInterface
         public void clearCache() {
-            Log.d("HFMApp_WebView", "clearCache() called. Launching CacheCleanerActivity.");
             Intent intent = new Intent(mContext, CacheCleanerActivity.class);
             mContext.startActivity(intent);
         }
 
         @JavascriptInterface
         public void openReader() {
-            Log.d("HFMApp_WebView", "openReader() called. Launching ReaderActivity.");
             Intent intent = new Intent(mContext, ReaderActivity.class);
             mContext.startActivity(intent);
         }
 
         @JavascriptInterface
         public void openStorageMap() {
-            Log.d("HFMApp_WebView", "openStorageMap() called. Launching StorageMapActivity.");
             Intent intent = new Intent(mContext, StorageMapActivity.class);
             mContext.startActivity(intent);
         }
 
         @JavascriptInterface
         public void onHideIconTapped() {
-            Log.d(TAG, "Hide icon tapped. Checking for existing rituals...");
             RitualManager ritualManager = new RitualManager();
             List<RitualManager.Ritual> rituals = ritualManager.loadRituals(mContext);
 
             if (rituals == null || rituals.isEmpty()) {
-                Log.d(TAG, "No rituals found. Launching FileHiderActivity.");
                 Intent intent = new Intent(mContext, FileHiderActivity.class);
                 mContext.startActivity(intent);
             } else {
-                Log.d(TAG, rituals.size() + " rituals found. Launching RitualListActivity.");
                 Intent intent = new Intent(mContext, RitualListActivity.class);
                 mContext.startActivity(intent);
             }
@@ -432,19 +466,17 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void setTheme(final String themeName) {
-            Log.d(TAG, "setTheme() called from WebView with theme: " + themeName);
             ThemeManager.setTheme(mContext, themeName);
             new android.os.Handler(mContext.getMainLooper()).post(new Runnable() {
-					@Override
-					public void run() {
-						Toast.makeText(mContext, "Theme changed. Please restart the app to see the full effect.", Toast.LENGTH_LONG).show();
-					}
-				});
+                @Override
+                public void run() {
+                    Toast.makeText(mContext, "Theme changed. Please restart the app to see the full effect.", Toast.LENGTH_LONG).show();
+                }
+            });
         }
 
         @JavascriptInterface
         public void openShareHub() {
-            Log.d("HFMApp_WebView", "openShareHub() called. Launching ShareHubActivity.");
             Intent intent = new Intent(mContext, ShareHubActivity.class);
             mContext.startActivity(intent);
         }
@@ -452,54 +484,42 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void openApiKeyDialog() {
             runOnUiThread(new Runnable() {
-					@Override
-					public void run() {
-						AlertDialog.Builder builder = new AlertDialog.Builder(mContext);
-						LayoutInflater inflater = (LayoutInflater) mContext.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
-						View dialogView = inflater.inflate(R.layout.dialog_api_key, null);
-						final EditText apiKeyInput = dialogView.findViewById(R.id.edit_text_api_key);
+                @Override
+                public void run() {
+                    AlertDialog.Builder builder = new AlertDialog.Builder(mContext);
+                    LayoutInflater inflater = (LayoutInflater) mContext.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+                    View dialogView = inflater.inflate(R.layout.dialog_api_key, null);
+                    final EditText apiKeyInput = dialogView.findViewById(R.id.edit_text_api_key);
 
-						String currentKey = ApiKeyManager.getApiKey(mContext);
-						if (currentKey != null) {
-							apiKeyInput.setText(currentKey);
-						}
+                    String currentKey = ApiKeyManager.getApiKey(mContext);
+                    if (currentKey != null) {
+                        apiKeyInput.setText(currentKey);
+                    }
 
-						builder.setView(dialogView)
-							.setPositiveButton("Save", new DialogInterface.OnClickListener() {
-								@Override
-								public void onClick(DialogInterface dialog, int id) {
-									String newKey = apiKeyInput.getText().toString().trim();
-									ApiKeyManager.saveApiKey(mContext, newKey);
-									if (newKey.isEmpty()) {
-										Toast.makeText(mContext, "API Key cleared.", Toast.LENGTH_SHORT).show();
-									} else {
-										Toast.makeText(mContext, "API Key saved.", Toast.LENGTH_SHORT).show();
-									}
-								}
-							})
-							.setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
-								public void onClick(DialogInterface dialog, int id) {
-									dialog.cancel();
-								}
-							});
-						builder.create().show();
-					}
-				});
+                    builder.setView(dialogView)
+                        .setPositiveButton("Save", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int id) {
+                                String newKey = apiKeyInput.getText().toString().trim();
+                                ApiKeyManager.saveApiKey(mContext, newKey);
+                                Toast.makeText(mContext, newKey.isEmpty() ? "API Key cleared." : "API Key saved.", Toast.LENGTH_SHORT).show();
+                            }
+                        })
+                        .setNegativeButton("Cancel", null);
+                    builder.create().show();
+                }
+            });
         }
 
-        // --- NEW JAVASCRIPT INTERFACE METHODS FOR GOOGLE DRIVE ---
-        
         @JavascriptInterface
         public boolean isDriveLoggedIn() {
             GoogleSignInAccount account = GoogleSignIn.getLastSignedInAccount(mContext);
-            // CHANGED: DRIVE_FILE to DRIVE
             return account != null && GoogleSignIn.hasPermissions(account, new Scope(DriveScopes.DRIVE));
         }
 
         @JavascriptInterface
         public void toggleDriveAuth() {
             if (isDriveLoggedIn()) {
-                // Log Out
                 googleSignInClient.signOut().addOnCompleteListener(new OnCompleteListener<Void>() {
                     @Override
                     public void onComplete(@NonNull Task<Void> task) {
@@ -508,7 +528,6 @@ public class MainActivity extends Activity {
                     }
                 });
             } else {
-                // Log In using classic startActivityForResult
                 Intent signInIntent = googleSignInClient.getSignInIntent();
                 startActivityForResult(signInIntent, GOOGLE_DRIVE_SIGNIN_REQUEST_CODE);
             }
@@ -520,56 +539,58 @@ public class MainActivity extends Activity {
                 Intent intent = new Intent(mContext, DriveViewerActivity.class);
                 mContext.startActivity(intent);
             } else {
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        Toast.makeText(mContext, "Please sign in to Google Drive first.", Toast.LENGTH_SHORT).show();
-                    }
-                });
+                runOnUiThread(() -> Toast.makeText(mContext, "Please sign in to Google Drive first.", Toast.LENGTH_SHORT).show());
             }
         }
 
-        // --- JAVASCRIPT INTERFACE METHODS FOR HFM MESSENGER DROP ---
-
         @JavascriptInterface
         public void sendViaDrop() {
-            Log.d("HFMApp_WebView", "sendViaDrop() called.");
             Intent intent = new Intent(mContext, CategoryPickerActivity.class);
             startActivityForResult(intent, DROP_FILE_PICKER_REQUEST_CODE);
         }
 
         @JavascriptInterface
         public void receiveViaDrop() {
-            Log.d("HFMApp_WebView", "receiveViaDrop() called.");
             Intent intent = new Intent(mContext, HFMDropActivity.class);
+            mContext.startActivity(intent);
+        }
+
+        // NEW JAVASCRIPT INTERFACE METHODS FOR CENTRAL CONFIG & QR SYSTEM
+
+        @JavascriptInterface
+        public void openSetup() {
+            Intent intent = new Intent(mContext, ClientSetupActivity.class);
+            mContext.startActivity(intent);
+        }
+
+        @JavascriptInterface
+        public void generateNetworkQr() {
+            Intent intent = new Intent(mContext, ClientQrGenerateActivity.class);
+            intent.putExtra(ClientQrGenerateActivity.EXTRA_MODE, ClientQrGenerateActivity.MODE_NETWORK);
+            mContext.startActivity(intent);
+        }
+
+        @JavascriptInterface
+        public void scanQrCode() {
+            Intent intent = new Intent(mContext, ClientQrScanActivity.class);
             mContext.startActivity(intent);
         }
 
         @JavascriptInterface
         public void regenerateHFMId() {
-            Log.d("HFMApp_WebView", "regenerateHFMId() called.");
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
                     new AlertDialog.Builder(mContext)
-                        .setTitle("Regenerate HFM ID")
-                        .setMessage("Are you sure? This will permanently delete your current anonymous ID. This action cannot be undone and may disrupt pending transfers.")
+                        .setTitle("Regenerate HFM Session")
+                        .setMessage("Regenerate session on client database?")
                         .setPositiveButton("Regenerate", new DialogInterface.OnClickListener() {
                             @Override
                             public void onClick(DialogInterface dialog, int which) {
-                                final FirebaseUser user = mAuth.getCurrentUser();
+                                FirebaseUser user = mCentralAuth.getCurrentUser();
                                 if (user != null) {
-                                    user.delete().addOnCompleteListener(new OnCompleteListener<Void>() {
-                                        @Override
-                                        public void onComplete(@NonNull Task<Void> task) {
-                                            if (task.isSuccessful()) {
-                                                Toast.makeText(mContext, "ID regenerated.", Toast.LENGTH_SHORT).show();
-                                                signInAnonymously();
-                                            } else {
-                                                Toast.makeText(mContext, "Failed to regenerate ID.", Toast.LENGTH_SHORT).show();
-                                            }
-                                        }
-                                    });
+                                    checkAndAuthenticateUser();
+                                    Toast.makeText(mContext, "Session re-synchronized.", Toast.LENGTH_SHORT).show();
                                 }
                             }
                         })
