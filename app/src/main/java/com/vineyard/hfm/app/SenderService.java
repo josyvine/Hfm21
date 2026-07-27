@@ -24,6 +24,7 @@ import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.Task;
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.DocumentReference;
@@ -40,6 +41,11 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
+/**
+ * Service handling file encryption, polymorphic sharding, Google Drive upload,
+ * and handshake creation on the Sender's private Client Firebase database.
+ * Automatically launches Option B Instant Drop QR Code upon handshake creation.
+ */
 public class SenderService extends Service {
 
     private static final String TAG = "SenderService";
@@ -64,8 +70,19 @@ public class SenderService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        mAuth = FirebaseAuth.getInstance();
-        db = FirebaseFirestore.getInstance();
+        
+        // Target the secondary Client Firebase instance ("client_hfm_app")
+        try {
+            FirebaseApp clientApp = FirebaseApp.getInstance(FirebaseManager.CLIENT_APP_NAME);
+            mAuth = FirebaseAuth.getInstance(clientApp);
+            db = FirebaseFirestore.getInstance(clientApp);
+            Log.d(TAG, "SenderService successfully bound to secondary Client Firestore.");
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Secondary client app not mounted. Falling back to default instance.", e);
+            mAuth = FirebaseAuth.getInstance();
+            db = FirebaseFirestore.getInstance();
+        }
+
         currentUser = mAuth.getCurrentUser();
         createNotificationChannel();
     }
@@ -121,7 +138,7 @@ public class SenderService extends Service {
             return;
         }
 
-        // Phase 2: Polymorphic Sharding & Encryption (heavy lifting)
+        // Phase 2: Polymorphic Sharding & Encryption
         MorphedShardEngine shardEngine = new MorphedShardEngine(this, driveManager);
         String encryptedManifestId = shardEngine.executeShardingAndUpload(inputFile, secretNumber, new MorphedShardEngine.ProgressListener() {
             @Override
@@ -147,20 +164,21 @@ public class SenderService extends Service {
             return;
         }
 
-        // Phase 3: Firebase Handshake
+        // Phase 3: Firebase Handshake on Client Database
         updateNotification("Creating secure handshake...", true);
         broadcastStatus("Creating Handshake...", "Contacting server...", -1, -1, -1);
-        String senderUsername = generateUsernameFromUid(currentUser.getUid());
+        
+        String currentUid = (currentUser != null) ? currentUser.getUid() : "anon_" + System.currentTimeMillis();
+        String senderUsername = generateUsernameFromUid(currentUid);
 
         Map<String, Object> dropRequest = new HashMap<>();
-        dropRequest.put("senderId", currentUser.getUid());
+        dropRequest.put("senderId", currentUid);
         dropRequest.put("senderUsername", senderUsername);
-        dropRequest.put("receiverUsername", receiverUsername);
+        dropRequest.put("receiverUsername", receiverUsername != null ? receiverUsername : "ANY");
         dropRequest.put("originalFilename", inputFile.getName());
-        dropRequest.put("encryptedManifestId", encryptedManifestId); // The KEY piece of information
-        dropRequest.put("filesize", inputFile.length()); // Send original size for receiver UI
+        dropRequest.put("encryptedManifestId", encryptedManifestId);
+        dropRequest.put("filesize", inputFile.length());
         dropRequest.put("status", "pending");
-        // The secret number is NEVER stored in Firebase. It's shared out-of-band.
         dropRequest.put("timestamp", System.currentTimeMillis());
 
         db.collection("drop_requests").add(dropRequest)
@@ -168,7 +186,11 @@ public class SenderService extends Service {
                 @Override
                 public void onSuccess(DocumentReference documentReference) {
                     dropRequestId = documentReference.getId();
-                    Log.d(TAG, "Drop request created with ID: " + dropRequestId);
+                    Log.d(TAG, "Drop request created on Client Firestore with ID: " + dropRequestId);
+                    
+                    // OPTION B TRIGGER: Display Instant Drop QR Code automatically for Receiver to scan
+                    launchInstantDropQrActivity(dropRequestId, secretNumber, inputFile.getName(), inputFile.length());
+
                     updateNotification("Waiting for receiver...", true);
                     broadcastStatus("Waiting for Receiver...", "Request sent. Waiting for acceptance.", -1, -1, -1);
                     listenForStatusChange(dropRequestId);
@@ -177,11 +199,30 @@ public class SenderService extends Service {
             .addOnFailureListener(new OnFailureListener() {
                 @Override
                 public void onFailure(@NonNull Exception e) {
-                    Log.e(TAG, "Failed to create drop request.", e);
+                    Log.e(TAG, "Failed to create drop request on client database.", e);
                     broadcastError("Failed to create drop request on server.\n\n" + getStackTraceAsString(e));
                     stopServiceAndCleanup(null);
                 }
             });
+    }
+
+    /**
+     * Launches ClientQrGenerateActivity in Option B (INSTANT_DROP) mode
+     * so the Sender can present the Instant Drop QR Code directly on screen.
+     */
+    private void launchInstantDropQrActivity(String dropRequestId, String secretNumber, String fileName, long fileSize) {
+        try {
+            Intent qrIntent = new Intent(this, ClientQrGenerateActivity.class);
+            qrIntent.putExtra(ClientQrGenerateActivity.EXTRA_MODE, ClientQrGenerateActivity.MODE_INSTANT_DROP);
+            qrIntent.putExtra(ClientQrGenerateActivity.EXTRA_DROP_REQUEST_ID, dropRequestId);
+            qrIntent.putExtra(ClientQrGenerateActivity.EXTRA_SECRET_NUMBER, secretNumber);
+            qrIntent.putExtra(ClientQrGenerateActivity.EXTRA_FILE_NAME, fileName);
+            qrIntent.putExtra(ClientQrGenerateActivity.EXTRA_FILE_SIZE, fileSize);
+            qrIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(qrIntent);
+        } catch (Exception e) {
+            Log.e(TAG, "Could not launch Instant Drop QR Activity", e);
+        }
     }
 
     private void broadcastStatus(String major, String minor, int progress, int max, long bytes) {
@@ -219,7 +260,7 @@ public class SenderService extends Service {
             @Override
             public void onEvent(DocumentSnapshot snapshot, FirebaseFirestoreException e) {
                 if (e != null) {
-                    Log.w(TAG, "Listen failed.", e);
+                    Log.w(TAG, "Listen failed on client DB snapshot.", e);
                     return;
                 }
 
@@ -235,14 +276,11 @@ public class SenderService extends Service {
                     } else if ("complete".equals(status)) {
                         broadcastComplete();
                         stopServiceAndCleanup(null);
-                        if (currentUser != null) {
-                            currentUser.delete();
-                        }
                     } else if ("error".equals(status)) {
                         stopServiceAndCleanup("An error occurred on the receiver's end.");
                     }
                 } else {
-                    Log.d(TAG, "Drop request document deleted by receiver (likely on completion or error).");
+                    Log.d(TAG, "Drop request document deleted by receiver (likely on completion).");
                     stopServiceAndCleanup(null);
                 }
             }
@@ -256,7 +294,6 @@ public class SenderService extends Service {
         int number = (int) (Math.abs((hash / (ADJECTIVES.length * NOUNS.length)) % 100));
         return ADJECTIVES[adjIndex] + "-" + NOUNS[nounIndex] + "-" + number;
     }
-
 
     private void stopServiceAndCleanup(final String toastMessage) {
         if (toastMessage != null) {
@@ -282,19 +319,13 @@ public class SenderService extends Service {
             db.collection("drop_requests").document(dropRequestId).get().addOnCompleteListener(new OnCompleteListener<DocumentSnapshot>() {
                 @Override
                 public void onComplete(@NonNull Task<DocumentSnapshot> task) {
-                    if (task.isSuccessful()) {
+                    if (task.isSuccessful() && task.getResult() != null) {
                         DocumentSnapshot document = task.getResult();
                         if (document.exists()) {
                             String status = document.getString("status");
-                            // Only delete the request if it wasn't completed (e.g., user cancelled)
                             if (!"complete".equals(status)) {
                                 document.getReference().delete()
-                                        .addOnSuccessListener(new OnSuccessListener<Void>() {
-                                            @Override
-                                            public void onSuccess(Void aVoid) {
-                                                Log.d(TAG, "Incomplete drop request document successfully deleted.");
-                                            }
-                                        });
+                                        .addOnSuccessListener(aVoid -> Log.d(TAG, "Incomplete drop request document deleted."));
                             }
                         }
                     }
