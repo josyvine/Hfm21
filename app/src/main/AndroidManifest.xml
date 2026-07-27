@@ -27,7 +27,7 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    
+
     <!-- Permission to get cache size of other apps -->
     <uses-permission android:name="android.permission.GET_PACKAGE_SIZE" />
 
@@ -68,7 +68,7 @@
             android:name=".SplashSetupActivity"
             android:configChanges="orientation|screenSize"
             android:exported="true"
-            android:theme="@style/AppTheme.MainActivity">
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
