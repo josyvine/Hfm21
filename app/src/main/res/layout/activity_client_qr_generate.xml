@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0f1724"
+    android:fillViewport="true"
+    android:padding="20dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
+
+        <!-- Top Header Bar -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="16dp">
+
+            <ImageButton
+                android:id="@+id/btn_back_qr"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_alignParentStart="true"
+                android:layout_centerVertical="true"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Back"
+                android:src="@android:drawable/ic_menu_revert"
+                android:tint="#FFFFFF" />
+
+            <TextView
+                android:id="@+id/tv_qr_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerInParent="true"
+                android:text="HFM QR Code"
+                android:textColor="#FFFFFF"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+        </RelativeLayout>
+
+        <TextView
+            android:id="@+id/tv_qr_subtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="Have the Receiver scan this QR Code using their HFM app."
+            android:textColor="#9AA7BD"
+            android:textSize="14sp" />
+
+        <!-- QR Code Container Card -->
+        <LinearLayout
+            android:layout_width="320dp"
+            android:layout_height="320dp"
+            android:layout_marginTop="24dp"
+            android:background="@android:drawable/dialog_holo_light_frame"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <ImageView
+                android:id="@+id/iv_qr_code"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="Generated QR Code Image"
+                android:scaleType="fitCenter" />
+
+            <ProgressBar
+                android:id="@+id/progressBarQr"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+        <!-- Instruction / Metadata Details -->
+        <TextView
+            android:id="@+id/tv_qr_instruction"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:gravity="center"
+            android:text="Network: My HFM Network"
+            android:textColor="#E6EEF8"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_secret_pin_display"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:text="Secret PIN: 1234-5678-9012-3456"
+            android:textColor="#10B981"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <!-- Action Buttons -->
+        <Button
+            android:id="@+id/btn_share_qr"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="28dp"
+            android:backgroundTint="#4F46E5"
+            android:text="Share QR Image"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btn_generate_network_qr"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="24dp"
+            android:backgroundTint="#1E293B"
+            android:text="Switch to Network Pairing QR (Option A)"
+            android:textAllCaps="false"
+            android:textColor="#9AA7BD"
+            android:textSize="14sp" />
+
+    </LinearLayout>
+</ScrollView>
