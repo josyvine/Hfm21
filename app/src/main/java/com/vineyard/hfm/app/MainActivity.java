@@ -65,7 +65,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Cold start check for Dashboard Activity
+        // Cold start check for Dashboard Activity (Daily File Dashboard)
         if (savedInstanceState == null) {
             startActivity(new Intent(this, DashboardActivity.class));
         }
@@ -270,7 +270,6 @@ public class MainActivity extends Activity {
                 try {
                     GoogleSignInAccount account = task.getResult(ApiException.class);
                     if (account != null && account.getIdToken() != null) {
-                        // Perform Central Firebase authentication using Google Credential
                         AuthCredential credential = GoogleAuthProvider.getCredential(account.getIdToken(), null);
                         mCentralAuth.signInWithCredential(credential).addOnCompleteListener(authTask -> {
                             if (authTask.isSuccessful() && mCentralAuth.getCurrentUser() != null) {
@@ -555,7 +554,7 @@ public class MainActivity extends Activity {
             mContext.startActivity(intent);
         }
 
-        // NEW JAVASCRIPT INTERFACE METHODS FOR CENTRAL CONFIG & QR SYSTEM
+        // JAVASCRIPT INTERFACE METHODS FOR CENTRAL CONFIG & QR SYSTEM (CALLED FROM DROP MODAL)
 
         @JavascriptInterface
         public void openSetup() {
