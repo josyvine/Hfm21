@@ -219,13 +219,17 @@ public class ClientQrScanActivity extends AppCompatActivity {
         }
 
         try {
-            // 2. Parse JSON Payload
+            // 2. Parse JSON Payload inside try block
             JSONObject wrapper = new JSONObject(decryptedJson);
 
             String type = wrapper.optString("type", ClientQrGenerateActivity.MODE_NETWORK);
             String firebaseConfigStr = wrapper.getString("firebaseConfig");
             String companyName = wrapper.getString("companyName");
             String projectId = wrapper.getString("projectId");
+
+            // Extract drop fields safely before thread dispatch to avoid checked exception inside lambda
+            String dropRequestId = wrapper.optString("dropRequestId", "");
+            String secretNumber = wrapper.optString("secretNumber", "");
 
             // 3. Configure local secondary Firebase database
             boolean success = FirebaseManager.setConfiguration(this, firebaseConfigStr, companyName, projectId);
@@ -245,9 +249,6 @@ public class ClientQrScanActivity extends AppCompatActivity {
                     } 
                     // Option B: Instant File Drop Payload
                     else if (ClientQrGenerateActivity.MODE_INSTANT_DROP.equals(type)) {
-                        String dropRequestId = wrapper.getString("dropRequestId");
-                        String secretNumber = wrapper.optString("secretNumber", "");
-
                         Toast.makeText(this, "Starting Instant File Drop download...", Toast.LENGTH_SHORT).show();
 
                         // Launch DownloadService directly with auto-extracted parameters
