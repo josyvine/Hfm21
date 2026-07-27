@@ -23,6 +23,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.firebase.FirebaseApp;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.firestore.DocumentReference;
 import com.google.firebase.firestore.DocumentSnapshot;
@@ -36,6 +37,12 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.Locale;
 
+/**
+ * Foreground Service responsible for fetching manifest details from the Client Firestore database,
+ * downloading polymorphic encrypted shards from Google Drive, and reconstructing files into .vault.
+ * DYNAMIC BYPASS:
+ * - Redirects all Firestore reads, listeners, and status updates to the secondary named app instance ("client_hfm_app").
+ */
 public class DownloadService extends Service {
 
     private static final String TAG = "DownloadService";
@@ -46,12 +53,21 @@ public class DownloadService extends Service {
     public static final String EXTRA_ERROR_MESSAGE = "com.vineyard.hfm.app.extra.ERROR_MESSAGE";
 
     private FirebaseFirestore db;
-    // requestListener and dropRequestId removed from here to support multiple files simultaneously
 
     @Override
     public void onCreate() {
         super.onCreate();
-        db = FirebaseFirestore.getInstance();
+        
+        // Target the secondary Client Firebase instance ("client_hfm_app")
+        try {
+            FirebaseApp clientApp = FirebaseApp.getInstance(FirebaseManager.CLIENT_APP_NAME);
+            db = FirebaseFirestore.getInstance(clientApp);
+            Log.d(TAG, "DownloadService successfully bound to secondary Client Firestore.");
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Secondary client app not mounted. Falling back to default instance.", e);
+            db = FirebaseFirestore.getInstance();
+        }
+
         createNotificationChannel();
     }
 
@@ -61,7 +77,7 @@ public class DownloadService extends Service {
             final String currentDropRequestId = intent.getStringExtra("drop_request_id");
             String rawSecretNumber = intent.getStringExtra("secret_number"); 
             
-            // --- CRITICAL FIX: Sanitize the PIN to remove invisible clipboard line-breaks ---
+            // Sanitize Secret PIN to strip unwanted whitespace/line-breaks
             final String passedSecretNumber = (rawSecretNumber != null) ? rawSecretNumber.trim().replaceAll("\\s+", "") : null;
 
             Notification notification = buildNotification("Initializing Secure Drop...", true, 0, 0);
@@ -70,7 +86,6 @@ public class DownloadService extends Service {
             new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    // Pass the sanitized PIN and startId into the processing thread
                     startDownloadProcess(currentDropRequestId, passedSecretNumber, startId);
                 }
             }).start();
@@ -79,17 +94,17 @@ public class DownloadService extends Service {
     }
 
     private void startDownloadProcess(final String docId, final String secretNumber, final int startId) {
-        // Phase 4 & 5: Reconstruction
+        // Fetch drop request from Client Firestore Database
         final DocumentReference docRef = db.collection("drop_requests").document(docId);
         
-        // Local listener for this specific file task
+        // Local snapshot listener for this transfer task
         final ListenerRegistration currentListener = listenForStatusChange(docRef, startId);
 
         docRef.get().addOnSuccessListener(new OnSuccessListener<DocumentSnapshot>() {
             @Override
             public void onSuccess(final DocumentSnapshot documentSnapshot) {
                 if (!documentSnapshot.exists()) {
-                    broadcastError("Error: Drop request not found.");
+                    broadcastError("Error: Drop request not found on client database.");
                     stopServiceAndCleanup(null, startId, currentListener, docId);
                     return;
                 }
@@ -98,7 +113,6 @@ public class DownloadService extends Service {
                 final long originalFilesize = documentSnapshot.getLong("filesize");
                 final String fileNameFromServer = documentSnapshot.getString("originalFilename");
 
-                // Check ONLY what the server provides, and ensure the UI passed the PIN successfully
                 if (encryptedManifestId == null) {
                     broadcastError("Error: Incomplete transfer details from server.");
                     stopServiceAndCleanup(null, startId, currentListener, docId);
@@ -106,12 +120,12 @@ public class DownloadService extends Service {
                 }
 
                 if (secretNumber == null || secretNumber.isEmpty()) {
-                    broadcastError("Error: Secret Number missing from receiver UI.");
+                    broadcastError("Error: Secret Number missing from receiver session.");
                     stopServiceAndCleanup(null, startId, currentListener, docId);
                     return;
                 }
 
-                // Authenticate with Google Drive
+                // Authenticate with Google Drive via central credentials
                 GoogleSignInAccount driveAccount = GoogleSignIn.getLastSignedInAccount(DownloadService.this);
                 if (driveAccount == null) {
                     broadcastError("Google Drive authentication failed. Please sign in again.");
@@ -123,15 +137,13 @@ public class DownloadService extends Service {
                 final ReconstructionEngine reconstructionEngine = new ReconstructionEngine(DownloadService.this, driveManager);
                 final SecureVaultManager vaultManager = new SecureVaultManager(DownloadService.this);
 
-                // Create a destination file in the secure vault
+                // Destination file inside local .vault container
                 final File vaultFile = vaultManager.createVaultFile(fileNameFromServer);
 
-                // --- CRITICAL FIX: Move heavy network/crypto logic completely off the Main Thread ---
                 new Thread(new Runnable() {
                     @Override
                     public void run() {
                         try {
-                            // FIX: To avoid Build Error, we use the final fileNameFromServer inside the ProgressListener
                             String originalFileName = reconstructionEngine.executeReconstruction(encryptedManifestId, secretNumber, vaultFile, new ReconstructionEngine.ProgressListener() {
                                 @Override
                                 public void onProgress(int progress, int max, long bytesProcessed) {
@@ -150,26 +162,19 @@ public class DownloadService extends Service {
                                 }
                             });
 
-                            // If we reach this line, reconstruction was successful
+                            // Reconstruction successful -> update document status on Client database
                             docRef.update("status", "complete");
                             updateNotification("Download Complete: " + originalFileName, false, 100, 100);
                             
-                            // Pass the variables to the broadcast for secure playback
+                            // Broadcast completion to UI
                             broadcastComplete(originalFileName, vaultFile.getAbsolutePath());
                             
-                            if (FirebaseAuth.getInstance().getCurrentUser() != null) {
-                                FirebaseAuth.getInstance().getCurrentUser().delete();
-                            }
                             stopServiceAndCleanup(null, startId, currentListener, docId);
 
                         } catch (Exception e) {
-                            // The engine threw a fatal error (Google Drive API or AES Decryption)
                             docRef.update("status", "error");
                             
-                            // Extract the massive, detailed Java stack trace
                             String exactErrorLog = getStackTraceAsString(e);
-                            
-                            // Broadcast the raw error log to the screen instead of the generic string
                             broadcastError("FATAL RECONSTRUCTION ERROR:\n\n" + exactErrorLog);
                             stopServiceAndCleanup(null, startId, currentListener, docId);
                         }
@@ -179,7 +184,7 @@ public class DownloadService extends Service {
         }).addOnFailureListener(new OnFailureListener() {
             @Override
             public void onFailure(@NonNull Exception e) {
-                broadcastError("Could not retrieve transfer details from the server.\n\n" + getStackTraceAsString(e));
+                broadcastError("Could not retrieve transfer details from client server.\n\n" + getStackTraceAsString(e));
                 stopServiceAndCleanup(null, startId, currentListener, docId);
             }
         });
@@ -247,11 +252,10 @@ public class DownloadService extends Service {
             listener.remove();
         }
 
-        if (docId != null) {
+        if (docId != null && db != null) {
             db.collection("drop_requests").document(docId).delete();
         }
 
-        // FIX: Ensuring startId is used so the service only stops if this was the last active task
         stopSelf(startId);
     }
 
@@ -289,7 +293,7 @@ public class DownloadService extends Service {
         if (max > 0) {
             builder.setProgress(max, progress, false);
         } else {
-            builder.setProgress(0, 0, true); // Indeterminate
+            builder.setProgress(0, 0, true);
         }
         return builder.build();
     }
