@@ -73,7 +73,7 @@ public class SenderService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        
+
         try {
             FirebaseApp clientApp = FirebaseApp.getInstance(FirebaseManager.CLIENT_APP_NAME);
             mAuth = FirebaseAuth.getInstance(clientApp);
@@ -216,11 +216,12 @@ public class SenderService extends Service {
         // Phase 3: Firebase Handshake on Client Database
         updateNotification("Creating secure handshake...", true);
         broadcastStatus("Creating Handshake...", "Contacting server...", -1, -1, -1);
-        
+
         String currentUid = (currentUser != null) ? currentUser.getUid() : "anon_" + System.currentTimeMillis();
         String senderUsername = generateUsernameFromUid(currentUid);
 
-        String summaryFilename = (totalFiles == 1) ? inputFiles.get(0).getName() : totalFiles + " files batch";
+        final String summaryFilename = (totalFiles == 1) ? inputFiles.get(0).getName() : totalFiles + " files batch";
+        final long finalTotalBatchSize = totalBatchSize;
         String primaryManifestId = (String) fileManifestList.get(0).get("encryptedManifestId");
 
         Map<String, Object> dropRequest = new HashMap<>();
@@ -229,7 +230,7 @@ public class SenderService extends Service {
         dropRequest.put("receiverUsername", receiverUsername != null ? receiverUsername.trim() : "ANY");
         dropRequest.put("originalFilename", summaryFilename);
         dropRequest.put("encryptedManifestId", primaryManifestId);
-        dropRequest.put("filesize", totalBatchSize);
+        dropRequest.put("filesize", finalTotalBatchSize);
         dropRequest.put("fileItems", fileManifestList); // Full batch items list
         dropRequest.put("status", "pending");
         dropRequest.put("timestamp", System.currentTimeMillis());
@@ -240,13 +241,13 @@ public class SenderService extends Service {
                 public void onSuccess(DocumentReference documentReference) {
                     dropRequestId = documentReference.getId();
                     Log.d(TAG, "Batch Drop request created on Client Firestore with ID: " + dropRequestId);
-                    
+
                     // GLITCH 1 & 4 FIX: Check if receiver is paired via Permanent QR Code
                     boolean isPairedReceiver = EncryptionHelper.getInstance(SenderService.this).isReceiverPaired(receiverUsername);
 
                     if (!isPairedReceiver && (receiverUsername == null || receiverUsername.trim().isEmpty() || "ANY".equalsIgnoreCase(receiverUsername.trim()))) {
                         // Launch Instant Drop QR Code ONLY for unpaired/one-time instant drop receivers
-                        launchInstantDropQrActivity(dropRequestId, secretNumber, summaryFilename, totalBatchSize);
+                        launchInstantDropQrActivity(dropRequestId, secretNumber, summaryFilename, finalTotalBatchSize);
                     } else {
                         Log.d(TAG, "Target receiver '" + receiverUsername + "' is paired on Permanent Network. Bypassing QR Code display.");
                     }
