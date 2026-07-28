@@ -10,6 +10,10 @@ import android.widget.AutoCompleteTextView;
 import androidx.security.crypto.EncryptedSharedPreferences;
 import androidx.security.crypto.MasterKeys;
 
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.firestore.DocumentSnapshot;
+import com.google.firebase.firestore.FirebaseFirestore;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -30,7 +34,7 @@ import javax.crypto.spec.SecretKeySpec;
  * 2. Payload encryption and decryption for Option A (Network Pairing) and Option B (Instant File Drop) QR Codes.
  * 3. Extraction of OAuth client credentials from saved configurations.
  * 4. Persistent storage of paired/used receiver usernames for auto-complete dropdowns.
- * 5. Checking network pairing state to bypass QR code displays when already paired.
+ * 5. Dynamic querying of cloud network_peers from Firestore to populate sender dropdowns automatically.
  */
 public class EncryptionHelper {
 
@@ -116,7 +120,7 @@ public class EncryptionHelper {
      * Saves a receiver username to persistent local storage for auto-complete suggestions.
      */
     public void saveReceiverUsername(String username) {
-        if (username == null || username.trim().isEmpty() || "ANY".equalsIgnoreCase(username)) {
+        if (username == null || username.trim().isEmpty() || "ANY".equalsIgnoreCase(username.trim())) {
             return;
         }
 
@@ -154,25 +158,62 @@ public class EncryptionHelper {
     }
 
     /**
-     * Helper method to configure an AutoCompleteTextView with saved receiver username history.
+     * Helper method to configure an AutoCompleteTextView with saved receiver usernames
+     * AND live network peers fetched from the Firestore network_peers collection.
      */
     public void setupAutoComplete(Context context, AutoCompleteTextView autoCompleteTextView) {
         if (autoCompleteTextView == null) return;
-        List<String> savedUsernames = getSavedUsernames();
-        if (!savedUsernames.isEmpty()) {
-            ArrayAdapter<String> adapter = new ArrayAdapter<>(context, android.R.layout.simple_dropdown_item_1line, savedUsernames);
-            autoCompleteTextView.setAdapter(adapter);
-            autoCompleteTextView.setThreshold(1);
-            autoCompleteTextView.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus && !savedUsernames.isEmpty()) {
-                    autoCompleteTextView.showDropDown();
-                }
-            });
-            autoCompleteTextView.setOnClickListener(v -> {
-                if (!savedUsernames.isEmpty()) {
-                    autoCompleteTextView.showDropDown();
-                }
-            });
+
+        List<String> localUsernames = getSavedUsernames();
+        Set<String> masterSet = new HashSet<>(localUsernames);
+
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(context, android.R.layout.simple_dropdown_item_1line, new ArrayList<>(masterSet));
+        autoCompleteTextView.setAdapter(adapter);
+        autoCompleteTextView.setThreshold(1);
+
+        autoCompleteTextView.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus && adapter.getCount() > 0) {
+                autoCompleteTextView.showDropDown();
+            }
+        });
+
+        autoCompleteTextView.setOnClickListener(v -> {
+            if (adapter.getCount() > 0) {
+                autoCompleteTextView.showDropDown();
+            }
+        });
+
+        // Query cloud network_peers collection from secondary Client Firestore instance
+        try {
+            FirebaseApp clientApp = FirebaseApp.getInstance(FirebaseManager.CLIENT_APP_NAME);
+            FirebaseFirestore clientDb = FirebaseFirestore.getInstance(clientApp);
+
+            clientDb.collection("network_peers").get()
+                    .addOnSuccessListener(queryDocumentSnapshots -> {
+                        if (queryDocumentSnapshots != null && !queryDocumentSnapshots.isEmpty()) {
+                            boolean changed = false;
+                            for (DocumentSnapshot doc : queryDocumentSnapshots.getDocuments()) {
+                                String username = doc.getString("username");
+                                if (username != null && !username.trim().isEmpty()) {
+                                    saveReceiverUsername(username); // Save to local prefs
+                                    if (masterSet.add(username.trim())) {
+                                        changed = true;
+                                    }
+                                }
+                            }
+                            if (changed) {
+                                adapter.clear();
+                                adapter.addAll(masterSet);
+                                adapter.notifyDataSetChanged();
+                                if (autoCompleteTextView.isFocused()) {
+                                    autoCompleteTextView.showDropDown();
+                                }
+                            }
+                        }
+                    })
+                    .addOnFailureListener(e -> Log.d(TAG, "Failed to query cloud network_peers for auto-complete", e));
+        } catch (Exception e) {
+            Log.d(TAG, "Secondary client app not mounted yet for cloud peer query.", e);
         }
     }
 
