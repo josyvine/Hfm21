@@ -15,10 +15,10 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.ComponentActivity;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
-import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
@@ -45,11 +45,11 @@ import java.util.concurrent.Executors;
 /**
  * Activity for the Receiver to scan the Sender's QR Code.
  * Handles both Option A (Network Pairing) and Option B (Instant File Drop) payloads automatically:
- * - Option A (NETWORK): Connects to Sender's Firebase database permanently.
+ * - Option A (NETWORK): Connects to Sender's Firebase database permanently and saves host name.
  * - Option B (INSTANT_DROP): Connects to Sender's DB and immediately launches DownloadService.
  */
 @androidx.camera.core.ExperimentalGetImage
-public class ClientQrScanActivity extends AppCompatActivity {
+public class ClientQrScanActivity extends ComponentActivity {
 
     private static final String TAG = "ClientQrScanActivity";
     private static final int PERMISSION_REQUEST_CAMERA = 2001;
@@ -219,7 +219,7 @@ public class ClientQrScanActivity extends AppCompatActivity {
         }
 
         try {
-            // 2. Parse JSON Payload inside try block
+            // 2. Parse JSON Payload
             JSONObject wrapper = new JSONObject(decryptedJson);
 
             String type = wrapper.optString("type", ClientQrGenerateActivity.MODE_NETWORK);
@@ -227,9 +227,14 @@ public class ClientQrScanActivity extends AppCompatActivity {
             String companyName = wrapper.getString("companyName");
             String projectId = wrapper.getString("projectId");
 
-            // Extract drop fields safely before thread dispatch to avoid checked exception inside lambda
+            // Extract drop fields safely
             String dropRequestId = wrapper.optString("dropRequestId", "");
             String secretNumber = wrapper.optString("secretNumber", "");
+
+            // Save company/host name into local receiver username history
+            if (companyName != null && !companyName.isEmpty()) {
+                EncryptionHelper.getInstance(this).saveReceiverUsername(companyName);
+            }
 
             // 3. Configure local secondary Firebase database
             boolean success = FirebaseManager.setConfiguration(this, firebaseConfigStr, companyName, projectId);
