@@ -202,12 +202,14 @@ public class EncryptionHelper {
                                 }
                             }
                             if (changed) {
-                                adapter.clear();
-                                adapter.addAll(masterSet);
-                                adapter.notifyDataSetChanged();
-                                if (autoCompleteTextView.isFocused()) {
-                                    autoCompleteTextView.showDropDown();
-                                }
+                                autoCompleteTextView.post(() -> {
+                                    adapter.clear();
+                                    adapter.addAll(masterSet);
+                                    adapter.notifyDataSetChanged();
+                                    if (autoCompleteTextView.isFocused()) {
+                                        autoCompleteTextView.showDropDown();
+                                    }
+                                });
                             }
                         }
                     })
