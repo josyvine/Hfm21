@@ -44,6 +44,8 @@ import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.Query;
 import com.google.firebase.firestore.QuerySnapshot;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -53,6 +55,7 @@ import java.util.Map;
  * Activity for listening to and accepting incoming single and batch HFM Drop requests.
  * INTEGRATED CONTROL CENTER:
  * - Redirects all Firestore queries and updates directly to secondary "client_hfm_app" instance.
+ * - Authenticates via Email/Password Silent Auth Bridge.
  * - Registers local device presence to Firestore network_peers collection.
  * - Provides inline setup options (Upload JSON, My QR Code, Scan QR Code) directly inside the HFM Drop feature.
  */
@@ -307,18 +310,75 @@ public class HFMDropActivity extends Activity {
         if (mAuth != null) {
             currentUser = mAuth.getCurrentUser();
             if (currentUser == null) {
-                signInAnonymously();
+                authenticateClientUser();
             } else {
                 updateUiWithUser(currentUser);
             }
         }
     }
 
-    private void signInAnonymously() {
+    /**
+     * Authenticates Receiver on secondary Client Firebase instance using Email/Password Silent Auth Bridge
+     */
+    private void authenticateClientUser() {
         if (mAuth == null) return;
 
         usernameTextView.setText("Generating ID...");
         regenerateIdButton.setEnabled(false);
+
+        FirebaseAuth centralAuth = FirebaseAuth.getInstance();
+        FirebaseUser centralUser = centralAuth.getCurrentUser();
+
+        if (centralUser != null && centralUser.getEmail() != null && !centralUser.getEmail().isEmpty()) {
+            String email = centralUser.getEmail();
+            String centralUid = centralUser.getUid();
+            String derivedPassword = calculateSecurePassword(email, centralUid);
+
+            mAuth.signInWithEmailAndPassword(email, derivedPassword)
+                    .addOnCompleteListener(this, task -> {
+                        if (task.isSuccessful()) {
+                            Log.d(TAG, "Silent Email/Password login successful on client DB.");
+                            currentUser = mAuth.getCurrentUser();
+                            updateUiWithUser(currentUser);
+                        } else {
+                            mAuth.createUserWithEmailAndPassword(email, derivedPassword)
+                                    .addOnCompleteListener(this, createTask -> {
+                                        if (createTask.isSuccessful()) {
+                                            Log.d(TAG, "Created secondary account on client DB.");
+                                            currentUser = mAuth.getCurrentUser();
+                                            updateUiWithUser(currentUser);
+                                        } else {
+                                            signInAnonymously();
+                                        }
+                                    });
+                        }
+                    });
+        } else {
+            signInAnonymously();
+        }
+    }
+
+    private String calculateSecurePassword(String email, String centralUid) {
+        try {
+            String input = email + centralUid + "HfmSecurePasswordSalt2026";
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
+            }
+            return hexString.toString().substring(0, 16);
+        } catch (Exception e) {
+            Log.e(TAG, "Password hash calculation error", e);
+            return "HfmFallbackPass123!";
+        }
+    }
+
+    private void signInAnonymously() {
+        if (mAuth == null) return;
+
         mAuth.signInAnonymously().addOnCompleteListener(this, new OnCompleteListener<AuthResult>() {
             @Override
             public void onComplete(@NonNull Task<AuthResult> task) {
@@ -345,7 +405,7 @@ public class HFMDropActivity extends Activity {
                 public void onComplete(@NonNull Task<Void> task) {
                     if (task.isSuccessful()) {
                         Log.d(TAG, "User session deleted from client DB.");
-                        signInAnonymously();
+                        authenticateClientUser();
                     } else {
                         Log.w(TAG, "User session deletion failed.", task.getException());
                         Toast.makeText(HFMDropActivity.this, "Failed to regenerate ID.", Toast.LENGTH_SHORT).show();
