@@ -507,7 +507,7 @@ public class MainActivity extends Activity {
             new android.os.Handler(mContext.getMainLooper()).post(new Runnable() {
                 @Override
                 public void run() {
-                    Toast.makeText(mContext, "Theme changed. Please restart the app to see the full effect.", Toast.LONG_LONG).show();
+                    Toast.makeText(mContext, "Theme changed. Please restart the app to see the full effect.", Toast.LENGTH_LONG).show();
                 }
             });
         }
