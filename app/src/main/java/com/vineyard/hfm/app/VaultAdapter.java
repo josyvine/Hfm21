@@ -63,7 +63,7 @@ public class VaultAdapter extends RecyclerView.Adapter<VaultAdapter.VaultViewHol
         holder.fileName.setText(displayName);
         holder.fileSize.setText(Formatter.formatFileSize(context, file.length()));
         
-        // ICON LOGIC: Set icon based on extension
+        // ICON LOGIC: Set context-aware icon based on extension
         holder.fileIcon.setImageResource(getIconForFileType(displayName));
         
         // Apply theme-based tint for visibility
@@ -85,6 +85,7 @@ public class VaultAdapter extends RecyclerView.Adapter<VaultAdapter.VaultViewHol
     }
 
     private int getIconForFileType(String fileName) {
+        if (fileName == null) return R.drawable.category_24px;
         String lower = fileName.toLowerCase();
         
         // Video Icons
@@ -98,14 +99,30 @@ public class VaultAdapter extends RecyclerView.Adapter<VaultAdapter.VaultViewHol
             lower.endsWith(".gif") || lower.endsWith(".webp") || lower.endsWith(".bmp")) {
             return R.drawable.image_24px;
         }
+
+        // Audio Icons
+        if (lower.endsWith(".mp3") || lower.endsWith(".wav") || lower.endsWith(".ogg") ||
+            lower.endsWith(".m4a") || lower.endsWith(".aac") || lower.endsWith(".flac")) {
+            return R.drawable.audio_file_24px;
+        }
+
+        // Code / Script Icons
+        if (lower.endsWith(".html") || lower.endsWith(".xml") || lower.endsWith(".js") ||
+            lower.endsWith(".css") || lower.endsWith(".java") || lower.endsWith(".kt") ||
+            lower.endsWith(".py") || lower.endsWith(".c") || lower.endsWith(".cpp") ||
+            lower.endsWith(".php") || lower.endsWith(".json") || lower.endsWith(".gradle")) {
+            return R.drawable.code_24px;
+        }
         
         // Document Icons
         if (lower.endsWith(".pdf") || lower.endsWith(".doc") || lower.endsWith(".docx") || 
-            lower.endsWith(".txt") || lower.endsWith(".log")) {
+            lower.endsWith(".xls") || lower.endsWith(".xlsx") || lower.endsWith(".ppt") ||
+            lower.endsWith(".pptx") || lower.endsWith(".txt") || lower.endsWith(".log") ||
+            lower.endsWith(".csv") || lower.endsWith(".rtf")) {
             return R.drawable.docs_24px;
         }
         
-        // Default Fallback
+        // Default Fallback (Archives, Packages, Unknown)
         return R.drawable.category_24px;
     }
 
