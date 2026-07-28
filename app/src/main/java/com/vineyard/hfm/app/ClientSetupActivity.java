@@ -13,11 +13,11 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.ComponentActivity;
 import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.appcompat.app.AppCompatActivity;
 
 import org.json.JSONObject;
 
@@ -31,9 +31,9 @@ import java.io.InputStreamReader;
  * Supports:
  * 1. Uploading google-services.json file via Android system file picker.
  * 2. Pasting raw JSON content directly into an input field.
- * 3. Binds the configuration to FirebaseManager and redirects to MainActivity / QR Generator.
+ * 3. Binds the configuration to FirebaseManager and redirects to MainActivity.
  */
-public class ClientSetupActivity extends AppCompatActivity {
+public class ClientSetupActivity extends ComponentActivity {
 
     private static final String TAG = "ClientSetupActivity";
 
