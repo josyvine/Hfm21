@@ -75,24 +75,24 @@
             </intent-filter>
         </activity>
 
-        <!-- SETUP & QR CODE ACTIVITIES (ACCESSED FROM HFM DROP) -->
+        <!-- SETUP & QR CODE ACTIVITIES (THEME UPDATED TO APPCOMPAT) -->
         <activity
             android:name=".ClientSetupActivity"
             android:label="Configure Network"
-            android:theme="@style/AppTheme.Light"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar"
             android:windowSoftInputMode="adjustResize"
             android:exported="false" />
 
         <activity
             android:name=".ClientQrGenerateActivity"
             android:label="HFM QR Code"
-            android:theme="@style/AppTheme.Light"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar"
             android:exported="false" />
 
         <activity
             android:name=".ClientQrScanActivity"
             android:label="Scan QR Code"
-            android:theme="@style/AppTheme.Dark"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar"
             android:exported="false" />
 
         <!-- ACTIVITY FOR MORPHED SHARD SYSTEM -->
