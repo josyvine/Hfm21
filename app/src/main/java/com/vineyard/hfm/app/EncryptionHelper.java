@@ -4,6 +4,8 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Base64;
 import android.util.Log;
+import android.widget.ArrayAdapter;
+import android.widget.AutoCompleteTextView;
 
 import androidx.security.crypto.EncryptedSharedPreferences;
 import androidx.security.crypto.MasterKeys;
@@ -28,6 +30,7 @@ import javax.crypto.spec.SecretKeySpec;
  * 2. Payload encryption and decryption for Option A (Network Pairing) and Option B (Instant File Drop) QR Codes.
  * 3. Extraction of OAuth client credentials from saved configurations.
  * 4. Persistent storage of paired/used receiver usernames for auto-complete dropdowns.
+ * 5. Checking network pairing state to bypass QR code displays when already paired.
  */
 public class EncryptionHelper {
 
@@ -131,6 +134,46 @@ public class EncryptionHelper {
     public List<String> getSavedUsernames() {
         Set<String> usernames = sharedPreferences.getStringSet(KEY_SAVED_USERNAMES, new HashSet<String>());
         return new ArrayList<>(usernames);
+    }
+
+    /**
+     * Checks if a given username belongs to an already paired network receiver.
+     * Used by SenderService to suppress Instant QR Generation when sending to paired users.
+     */
+    public boolean isReceiverPaired(String username) {
+        if (username == null || username.trim().isEmpty() || "ANY".equalsIgnoreCase(username.trim())) {
+            return false;
+        }
+        List<String> savedUsernames = getSavedUsernames();
+        for (String saved : savedUsernames) {
+            if (saved.equalsIgnoreCase(username.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Helper method to configure an AutoCompleteTextView with saved receiver username history.
+     */
+    public void setupAutoComplete(Context context, AutoCompleteTextView autoCompleteTextView) {
+        if (autoCompleteTextView == null) return;
+        List<String> savedUsernames = getSavedUsernames();
+        if (!savedUsernames.isEmpty()) {
+            ArrayAdapter<String> adapter = new ArrayAdapter<>(context, android.R.layout.simple_dropdown_item_1line, savedUsernames);
+            autoCompleteTextView.setAdapter(adapter);
+            autoCompleteTextView.setThreshold(1);
+            autoCompleteTextView.setOnFocusChangeListener((v, hasFocus) -> {
+                if (hasFocus && !savedUsernames.isEmpty()) {
+                    autoCompleteTextView.showDropDown();
+                }
+            });
+            autoCompleteTextView.setOnClickListener(v -> {
+                if (!savedUsernames.isEmpty()) {
+                    autoCompleteTextView.showDropDown();
+                }
+            });
+        }
     }
 
     /**
