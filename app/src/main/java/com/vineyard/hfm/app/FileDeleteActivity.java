@@ -20,6 +20,7 @@ import android.text.format.Formatter;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.AutoCompleteTextView;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
@@ -253,14 +254,11 @@ public class FileDeleteActivity extends Activity {
             }
         });
 
+        // GLITCH 4 FIX: Allow batch sending via HFM Drop
         sendToDropZoneButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (selectedFiles.size() == 1) {
-                    showSendToDropDialog(selectedFiles.get(0));
-                } else {
-                    Toast.makeText(FileDeleteActivity.this, "HFM Drop currently supports sending a single file at a time.", Toast.LENGTH_LONG).show();
-                }
+                showSendToDropDialog(selectedFiles);
                 dialog.dismiss();
             }
         });
@@ -399,11 +397,14 @@ public class FileDeleteActivity extends Activity {
         dialog.show();
     }
 
-    private void showSendToDropDialog(final File fileToSend) {
+    private void showSendToDropDialog(final List<File> filesToSend) {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         LayoutInflater inflater = this.getLayoutInflater();
         View dialogView = inflater.inflate(R.layout.dialog_send_drop, null);
-        final EditText receiverUsernameInput = dialogView.findViewById(R.id.edit_text_receiver_username);
+        final AutoCompleteTextView receiverUsernameInput = dialogView.findViewById(R.id.edit_text_receiver_username);
+
+        // GLITCH 3 FIX: Bind Auto-Complete Dropdown using EncryptionHelper
+        EncryptionHelper.getInstance(this).setupAutoComplete(this, receiverUsernameInput);
 
         builder.setView(dialogView)
                 .setPositiveButton("Send", new DialogInterface.OnClickListener() {
@@ -413,7 +414,9 @@ public class FileDeleteActivity extends Activity {
                         if (receiverUsername.isEmpty()) {
                             Toast.makeText(FileDeleteActivity.this, "Receiver username cannot be empty.", Toast.LENGTH_SHORT).show();
                         } else {
-                            showSenderWarningDialog(receiverUsername, fileToSend);
+                            // GLITCH 3 FIX: Save receiver username to local preferences
+                            EncryptionHelper.getInstance(FileDeleteActivity.this).saveReceiverUsername(receiverUsername);
+                            showSenderWarningDialog(receiverUsername, filesToSend);
                         }
                     }
                 })
@@ -421,7 +424,13 @@ public class FileDeleteActivity extends Activity {
         builder.create().show();
     }
 
-    private void showSenderWarningDialog(final String receiverUsername, final File fileToSend) {
+    private void showSendToDropDialog(final File fileToSend) {
+        List<File> singleFileList = new ArrayList<>();
+        singleFileList.add(fileToSend);
+        showSendToDropDialog(singleFileList);
+    }
+
+    private void showSenderWarningDialog(final String receiverUsername, final List<File> filesToSend) {
         final String secretNumber = generateSecretNumber();
 
         new AlertDialog.Builder(this)
@@ -432,21 +441,38 @@ public class FileDeleteActivity extends Activity {
                 .setPositiveButton("I Understand, Start Sending", new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
-                        startSenderService(receiverUsername, secretNumber, fileToSend);
+                        startSenderService(receiverUsername, secretNumber, filesToSend);
                     }
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
     }
 
-    private void startSenderService(String receiverUsername, String secretNumber, File fileToSend) {
-        if (fileToSend == null || !fileToSend.exists()) {
-            Toast.makeText(this, "Error: File to send does not exist.", Toast.LENGTH_SHORT).show();
+    private void startSenderService(String receiverUsername, String secretNumber, List<File> filesToSend) {
+        if (filesToSend == null || filesToSend.isEmpty()) {
+            Toast.makeText(this, "Error: No files selected to send.", Toast.LENGTH_SHORT).show();
             return;
         }
+
+        ArrayList<String> filePaths = new ArrayList<>();
+        for (File file : filesToSend) {
+            if (file != null && file.exists()) {
+                filePaths.add(file.getAbsolutePath());
+            }
+        }
+
+        if (filePaths.isEmpty()) {
+            Toast.makeText(this, "Error: Selected files do not exist on disk.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // GLITCH 3 FIX: Save username to history
+        EncryptionHelper.getInstance(this).saveReceiverUsername(receiverUsername);
+
+        // GLITCH 4 FIX: Send all selected files in a single batch intent extra
         Intent intent = new Intent(this, SenderService.class);
         intent.setAction(SenderService.ACTION_START_SEND);
-        intent.putExtra(SenderService.EXTRA_FILE_PATH, fileToSend.getAbsolutePath());
+        intent.putStringArrayListExtra(SenderService.EXTRA_FILE_PATHS, filePaths);
         intent.putExtra(SenderService.EXTRA_RECEIVER_USERNAME, receiverUsername);
         intent.putExtra(SenderService.EXTRA_SECRET_NUMBER, secretNumber);
         ContextCompat.startForegroundService(this, intent);
@@ -471,7 +497,6 @@ public class FileDeleteActivity extends Activity {
             return;
         }
 
-        // Execute on Parallel Thread Pool to prevent global AsyncTask queue starvation
         new PreDeletionCheckTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
@@ -520,7 +545,6 @@ public class FileDeleteActivity extends Activity {
             List<File> finalToDelete = new ArrayList<>(masterDeleteSet);
             boolean requiresSdCardPermission = false;
 
-            // Query SD Card path and permission ONCE before loop to prevent Binder IPC & disk read stalls
             String sdCardPath = StorageUtils.getSdCardPath(FileDeleteActivity.this);
             boolean hasSdPermission = StorageUtils.hasSdCardPermission(FileDeleteActivity.this);
 
@@ -838,7 +862,6 @@ public class FileDeleteActivity extends Activity {
                  if (!recycleBinDir.mkdir()) return new ArrayList<>();
             }
 
-            // Pre-fetch SD Card path once
             String sdCardPath = StorageUtils.getSdCardPath(context);
 
             for (File sourceFile : filesToMove) {
@@ -887,7 +910,6 @@ public class FileDeleteActivity extends Activity {
                 }
             }
 
-            // Immediately purge source file paths from MediaStore DB to resolve Glitch 1
             if (!purgedSourcePaths.isEmpty()) {
                 MediaStoreUtils.purgePathsFromMediaStore(context, purgedSourcePaths);
             }
