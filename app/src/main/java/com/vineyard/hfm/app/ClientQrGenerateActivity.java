@@ -1,5 +1,6 @@
 package com.vineyard.hfm.app;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.net.Uri;
@@ -13,7 +14,7 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.appcompat.app.AppCompatActivity;
+import androidx.activity.ComponentActivity;
 import androidx.core.content.FileProvider;
 
 import com.google.zxing.BarcodeFormat;
@@ -33,7 +34,7 @@ import java.io.IOException;
  * 1. Option A (NETWORK): One-Time Network Pairing (generated before file upload).
  * 2. Option B (INSTANT_DROP): Direct One-Step File Drop (generated after file upload & sharding).
  */
-public class ClientQrGenerateActivity extends AppCompatActivity {
+public class ClientQrGenerateActivity extends ComponentActivity {
 
     private static final String TAG = "ClientQrGenerateActivity";
 
