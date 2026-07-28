@@ -431,6 +431,7 @@
                 <button class="btn" id="sendDropBtn">Send File via Drop</button>
                 <button class="btn" id="receiveDropBtn">Receive File via Drop</button>
                 <button class="btn ghost" id="modalSetupBtn" style="border-color: #4f46e5; color: #fff;">Setup Sender Network (JSON)</button>
+                <button class="btn ghost" id="modalNetworkQrBtn" style="border-color: #8b5cf6; color: #fff;">Show My Network QR (Option A)</button>
                 <button class="btn ghost" id="modalScanQrBtn" style="border-color: #10b981; color: #fff;">Scan QR Code to Receive</button>
                 <button class="btn ghost" id="regenerateDropIdBtn">Regenerate My HFM Session</button>
                 <button class="btn ghost" id="closeDropModalBtn">Cancel</button>
@@ -464,6 +465,7 @@ document.addEventListener("DOMContentLoaded", function() {
     
     // Modal setup buttons
     const modalSetupBtn = document.getElementById('modalSetupBtn');
+    const modalNetworkQrBtn = document.getElementById('modalNetworkQrBtn');
     const modalScanQrBtn = document.getElementById('modalScanQrBtn');
 
     // Drive Auth Variables
@@ -479,6 +481,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
         // Modal Setup Listeners
         if (modalSetupBtn) modalSetupBtn.onclick = function() { callAndroid('openSetup'); closeDropModal(); };
+        if (modalNetworkQrBtn) modalNetworkQrBtn.onclick = function() { callAndroid('generateNetworkQr'); closeDropModal(); };
         if (modalScanQrBtn) modalScanQrBtn.onclick = function() { callAndroid('scanQrCode'); closeDropModal(); };
 
         openNativeSearchBtn.onclick = function() { callAndroid('openSearch'); };
