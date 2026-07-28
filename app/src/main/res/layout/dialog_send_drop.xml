@@ -14,13 +14,14 @@
         android:textStyle="bold"
         android:layout_marginBottom="16dp"/>
 
-    <EditText
+    <AutoCompleteTextView
         android:id="@+id/edit_text_receiver_username"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="Enter Receiver's Username"
         android:inputType="text"
         android:maxLines="1"
+        android:completionThreshold="1"
         android:background="@drawable/search_input_background"
         android:padding="12dp"/>
 
@@ -28,7 +29,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:text="Example: Red-Tiger-52. Usernames are case-sensitive."
+        android:text="Example: Red-Tiger-52. Select from history or enter a new username."
         android:textSize="12sp" />
 
 </LinearLayout>
