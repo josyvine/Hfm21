@@ -360,6 +360,10 @@ public class HFMDropActivity extends Activity {
             String username = generateUsernameFromUid(user.getUid());
             usernameTextView.setText(username);
             regenerateIdButton.setEnabled(true);
+
+            // Automatically save self username to history
+            EncryptionHelper.getInstance(this).saveReceiverUsername(username);
+
             listenForDropRequests(username);
         }
     }
@@ -400,6 +404,11 @@ public class HFMDropActivity extends Activity {
                             DropRequest request = dc.getDocument().toObject(DropRequest.class);
                             request.id = dc.getDocument().getId();
                             requestList.add(request);
+
+                            // Save sender username into local username history when a request arrives
+                            if (request.senderUsername != null) {
+                                EncryptionHelper.getInstance(HFMDropActivity.this).saveReceiverUsername(request.senderUsername);
+                            }
                         }
                     }
                 }
