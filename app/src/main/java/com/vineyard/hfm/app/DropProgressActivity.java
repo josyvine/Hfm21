@@ -122,7 +122,6 @@ public class DropProgressActivity extends Activity {
                     // Update Progress Details (Transferred vs Total)
                     if (bytes != -1 && max != -1) {
                         String bytesStr = Formatter.formatFileSize(context, bytes);
-                        // If max is representing file size
                         progressDetailsTextView.setText(String.format(Locale.US, "Processed: %s", bytesStr));
                     } else {
                         progressDetailsTextView.setText("");
@@ -135,19 +134,20 @@ public class DropProgressActivity extends Activity {
                     progressBar.setIndeterminate(false);
                     progressBar.setProgress(progressBar.getMax());
                     
-                    // --- RE-INTEGRATED PLAYBACK LOGIC ---
                     final String originalFileName = intent.getStringExtra("original_file_name");
                     final String vaultFilePath = intent.getStringExtra("vault_file_path");
 
                     if (!isSender && vaultFilePath != null && originalFileName != null) {
-                        cancelButton.setText("Play File");
-                        // Hex color preserved from original logic
+                        // GLITCH 2 FIX: Resolve context-aware action label dynamically
+                        SecureVaultManager vaultManager = new SecureVaultManager(DropProgressActivity.this);
+                        String actionLabel = vaultManager.getActionLabel(originalFileName);
+
+                        cancelButton.setText(actionLabel);
                         cancelButton.setBackgroundColor(android.graphics.Color.parseColor("#4f46e5")); 
                         cancelButton.setOnClickListener(new View.OnClickListener() {
                             @Override
                             public void onClick(View v) {
                                 java.io.File vaultFile = new java.io.File(vaultFilePath);
-                                // Logic: Call updated playSecurely to show the choice dialog
                                 new SecureVaultManager(DropProgressActivity.this).playSecurely(vaultFile, originalFileName);
                             }
                         });
