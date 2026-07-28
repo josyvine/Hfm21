@@ -19,6 +19,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import javax.crypto.Cipher;
+import javax.crypto.spec.SecretKeySpec;
+
 /**
  * Handles security operations for HFM:
  * 1. AES-256 encrypted local storage of dynamic Client Firebase configurations.
@@ -30,7 +33,7 @@ public class EncryptionHelper {
 
     private static final String TAG = "EncryptionHelper";
     private static final String PREFS_FILENAME = "hfm_secure_app_prefs";
-    
+
     // Keys for EncryptedSharedPreferences
     private static final String KEY_USER_ROLE = "key_user_role";
     private static final String KEY_FIREBASE_CONFIG = "key_firebase_config";
@@ -97,7 +100,7 @@ public class EncryptionHelper {
     public String getCompanyName() {
         return sharedPreferences.getString(KEY_COMPANY_NAME, "My HFM Network");
     }
-    
+
     public String getProjectId() {
         return sharedPreferences.getString(KEY_PROJECT_ID, null);
     }
@@ -136,7 +139,7 @@ public class EncryptionHelper {
     public void clearSavedUsernames() {
         sharedPreferences.edit().remove(KEY_SAVED_USERNAMES).apply();
     }
-    
+
     public void clearAllData() {
         sharedPreferences.edit().clear().apply();
     }
