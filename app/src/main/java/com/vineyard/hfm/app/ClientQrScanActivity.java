@@ -42,6 +42,8 @@ import com.google.firebase.firestore.FirebaseFirestore;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -51,7 +53,7 @@ import java.util.concurrent.Executors;
 /**
  * Activity for the Receiver to scan the Sender's QR Code.
  * Handles both Option A (Network Pairing) and Option B (Instant File Drop) payloads automatically:
- * - Option A (NETWORK): Connects to Sender's Firebase database permanently, registers presence on network_peers, and saves host name.
+ * - Option A (NETWORK): Connects to Sender's Firebase database permanently, authenticates via Email/Password bridge, registers presence on network_peers, and saves host name.
  * - Option B (INSTANT_DROP): Connects to Sender's DB and immediately launches DownloadService.
  */
 @androidx.camera.core.ExperimentalGetImage
@@ -297,7 +299,7 @@ public class ClientQrScanActivity extends ComponentActivity {
 
     /**
      * Registers this receiver's presence in the shared Firestore network_peers collection.
-     * This enables the Sender (Phone A) to query active network peers and display this device in the dropdown list automatically.
+     * Authenticates with Client Firebase via Email/Password Silent Auth Bridge.
      */
     private void registerReceiverPresenceOnCloud(String networkName) {
         try {
@@ -308,14 +310,63 @@ public class ClientQrScanActivity extends ComponentActivity {
             if (clientAuth.getCurrentUser() != null) {
                 publishPresenceDocument(clientAuth.getCurrentUser().getUid(), networkName, clientDb);
             } else {
-                clientAuth.signInAnonymously().addOnCompleteListener(task -> {
-                    if (task.isSuccessful() && clientAuth.getCurrentUser() != null) {
-                        publishPresenceDocument(clientAuth.getCurrentUser().getUid(), networkName, clientDb);
-                    }
-                });
+                // Check if Central Google User exists for Email/Password Silent Auth
+                FirebaseAuth centralAuth = FirebaseAuth.getInstance();
+                if (centralAuth.getCurrentUser() != null && centralAuth.getCurrentUser().getEmail() != null) {
+                    String email = centralAuth.getCurrentUser().getEmail();
+                    String centralUid = centralAuth.getCurrentUser().getUid();
+                    String derivedPassword = calculateSecurePassword(email, centralUid);
+
+                    clientAuth.signInWithEmailAndPassword(email, derivedPassword)
+                            .addOnCompleteListener(task -> {
+                                if (task.isSuccessful() && clientAuth.getCurrentUser() != null) {
+                                    publishPresenceDocument(clientAuth.getCurrentUser().getUid(), networkName, clientDb);
+                                } else {
+                                    // Create account on Client Firebase if it doesn't exist
+                                    clientAuth.createUserWithEmailAndPassword(email, derivedPassword)
+                                            .addOnCompleteListener(createTask -> {
+                                                if (createTask.isSuccessful() && clientAuth.getCurrentUser() != null) {
+                                                    publishPresenceDocument(clientAuth.getCurrentUser().getUid(), networkName, clientDb);
+                                                } else {
+                                                    // Fallback to anonymous authentication
+                                                    clientAuth.signInAnonymously().addOnCompleteListener(anonTask -> {
+                                                        if (anonTask.isSuccessful() && clientAuth.getCurrentUser() != null) {
+                                                            publishPresenceDocument(clientAuth.getCurrentUser().getUid(), networkName, clientDb);
+                                                        }
+                                                    });
+                                                }
+                                            });
+                                }
+                            });
+                } else {
+                    // Fallback to anonymous sign-in if no central account exists
+                    clientAuth.signInAnonymously().addOnCompleteListener(task -> {
+                        if (task.isSuccessful() && clientAuth.getCurrentUser() != null) {
+                            publishPresenceDocument(clientAuth.getCurrentUser().getUid(), networkName, clientDb);
+                        }
+                    });
+                }
             }
         } catch (Exception e) {
             Log.e(TAG, "Error registering presence on cloud network_peers", e);
+        }
+    }
+
+    private String calculateSecurePassword(String email, String centralUid) {
+        try {
+            String input = email + centralUid + "HfmSecurePasswordSalt2026";
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : hash) {
+                String hex = Integer.toHexString(0xff & b);
+                if (hex.length() == 1) hexString.append('0');
+                hexString.append(hex);
+            }
+            return hexString.toString().substring(0, 16);
+        } catch (Exception e) {
+            Log.e(TAG, "Password hash calculation error", e);
+            return "HfmFallbackPass123!";
         }
     }
 
