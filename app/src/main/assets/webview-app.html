@@ -253,26 +253,10 @@
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3s3-1.34 3-3-1.34-3-3-3z"/></svg>
           <span>Share</span>
         </button>
-        <!-- NEW HFM Drop Button -->
+        <!-- HFM Drop Button -->
         <button class="slider-icon-btn" id="hfmDropBtn" title="HFM Messenger Drop">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
             <span>Drop</span>
-        </button>
-
-        <hr class="slider-divider">
-
-        <!-- CENTRAL CONFIG & QR BUTTONS IN SLIDER MENU -->
-        <button class="slider-icon-btn" id="setupConfigBtn" title="Configure Network">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.04-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.81c-.11.2-.06.47.12.61l2.03 1.58c-.02.33 0 .64.04.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.11-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-          <span>Setup</span>
-        </button>
-        <button class="slider-icon-btn" id="generateQrBtn" title="My Network QR">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h8v8H3V3zm2 2v4h4V5H5zm8-2h8v8h-8V3zm2 2v4h4V5h-4zM3 13h8v8H3v-8zm2 2v4h4v-4H5zm13-2h3v2h-3v-2zm-3 0h2v3h-2v-3zm3 3h3v5h-3v-5zm-3 2h2v3h-2v-3zm0-2h3v2h-3v-2z"/></svg>
-          <span>My QR</span>
-        </button>
-        <button class="slider-icon-btn" id="scanQrBtn" title="Scan QR Code">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M9.5 6.5v3h-3v-3h3M11 5H5v6h6V5zm-1.5 9.5v3h-3v-3h3M11 13H5v6h6v-6zm8.5-8v3h-3v-3h3M19 5h-6v6h6V5zm-6 8h1.5v1.5H13V13zm1.5 1.5H16V16h-1.5v-1.5zm1.5-1.5H19v1.5h-1.5V13zm0 3H19v3h-1.5v-3zm-1.5 1.5H16V19h-1.5v-1.5zm-1.5-1.5H13v1.5h1.5V16z"/></svg>
-          <span>Scan QR</span>
         </button>
 
         <hr class="slider-divider">
@@ -436,7 +420,7 @@
 	  </div>
     </div>
 
-    <!-- NEW HFM DROP MODAL WITH GOOGLE DRIVE & SETUP BUTTONS -->
+    <!-- HFM DROP MODAL WITH GOOGLE DRIVE & SETUP BUTTONS -->
     <div id="dropModal" class="modal hidden">
         <div class="box">
             <h3>HFM Messenger Drop</h3>
@@ -461,9 +445,6 @@ document.addEventListener("DOMContentLoaded", function() {
     const openFolderBtn = document.getElementById('openFolderBtn');
     const shareHubBtn = document.getElementById('shareHubBtn');
     const hfmDropBtn = document.getElementById('hfmDropBtn'); 
-    const setupConfigBtn = document.getElementById('setupConfigBtn');
-    const generateQrBtn = document.getElementById('generateQrBtn');
-    const scanQrBtn = document.getElementById('scanQrBtn');
     const panel = document.querySelector('.panel');
     const helpBtn = document.getElementById('helpBtn');
     const helpView = document.getElementById('helpView');
@@ -481,7 +462,7 @@ document.addEventListener("DOMContentLoaded", function() {
     const dropModal = document.getElementById('dropModal'); 
     const geminiBtn = document.getElementById('geminiBtn');
     
-    // Modal buttons
+    // Modal setup buttons
     const modalSetupBtn = document.getElementById('modalSetupBtn');
     const modalScanQrBtn = document.getElementById('modalScanQrBtn');
 
@@ -496,11 +477,7 @@ document.addEventListener("DOMContentLoaded", function() {
         shareHubBtn.onclick = function() { callAndroid('openShareHub'); };
         hfmDropBtn.onclick = openDropModal; 
 
-        // New Menu Listeners
-        if (setupConfigBtn) setupConfigBtn.onclick = function() { callAndroid('openSetup'); };
-        if (generateQrBtn) generateQrBtn.onclick = function() { callAndroid('generateNetworkQr'); };
-        if (scanQrBtn) scanQrBtn.onclick = function() { callAndroid('scanQrCode'); };
-
+        // Modal Setup Listeners
         if (modalSetupBtn) modalSetupBtn.onclick = function() { callAndroid('openSetup'); closeDropModal(); };
         if (modalScanQrBtn) modalScanQrBtn.onclick = function() { callAndroid('scanQrCode'); closeDropModal(); };
 
