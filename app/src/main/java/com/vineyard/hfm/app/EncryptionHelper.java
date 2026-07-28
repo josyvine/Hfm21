@@ -14,15 +14,17 @@ import org.json.JSONObject;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
-
-import javax.crypto.Cipher;
-import javax.crypto.spec.SecretKeySpec;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
  * Handles security operations for HFM:
  * 1. AES-256 encrypted local storage of dynamic Client Firebase configurations.
  * 2. Payload encryption and decryption for Option A (Network Pairing) and Option B (Instant File Drop) QR Codes.
  * 3. Extraction of OAuth client credentials from saved configurations.
+ * 4. Persistent storage of paired/used receiver usernames for auto-complete dropdowns.
  */
 public class EncryptionHelper {
 
@@ -35,6 +37,7 @@ public class EncryptionHelper {
     private static final String KEY_COMPANY_NAME = "key_company_name";
     private static final String KEY_PROJECT_ID = "key_project_id";
     private static final String KEY_IS_SETUP_DONE = "key_is_setup_done";
+    private static final String KEY_SAVED_USERNAMES = "key_saved_usernames";
 
     // Secret Key used for AES encryption/decryption of QR payloads between Sender and Receiver
     private static final String QR_ENCRYPTION_KEY = "HfmAppSuperSecretKey2026";
@@ -101,6 +104,37 @@ public class EncryptionHelper {
 
     public boolean isSetupDone() {
         return sharedPreferences.getBoolean(KEY_IS_SETUP_DONE, false);
+    }
+
+    /**
+     * Saves a receiver username to persistent local storage for auto-complete suggestions.
+     */
+    public void saveReceiverUsername(String username) {
+        if (username == null || username.trim().isEmpty() || "ANY".equalsIgnoreCase(username)) {
+            return;
+        }
+
+        Set<String> usernames = sharedPreferences.getStringSet(KEY_SAVED_USERNAMES, new HashSet<String>());
+        Set<String> updatedUsernames = new HashSet<>(usernames);
+        updatedUsernames.add(username.trim());
+
+        sharedPreferences.edit().putStringSet(KEY_SAVED_USERNAMES, updatedUsernames).apply();
+        Log.d(TAG, "Saved receiver username to history: " + username);
+    }
+
+    /**
+     * Retrieves the list of all previously saved/paired receiver usernames.
+     */
+    public List<String> getSavedUsernames() {
+        Set<String> usernames = sharedPreferences.getStringSet(KEY_SAVED_USERNAMES, new HashSet<String>());
+        return new ArrayList<>(usernames);
+    }
+
+    /**
+     * Clears all saved receiver usernames.
+     */
+    public void clearSavedUsernames() {
+        sharedPreferences.edit().remove(KEY_SAVED_USERNAMES).apply();
     }
     
     public void clearAllData() {
