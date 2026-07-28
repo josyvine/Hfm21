@@ -230,10 +230,14 @@ public class ClientQrScanActivity extends ComponentActivity {
             // Extract drop fields safely
             String dropRequestId = wrapper.optString("dropRequestId", "");
             String secretNumber = wrapper.optString("secretNumber", "");
+            String senderUsername = wrapper.optString("senderUsername", "");
 
-            // Save company/host name into local receiver username history
-            if (companyName != null && !companyName.isEmpty()) {
+            // Save company/host name and sender username into local receiver username history
+            if (companyName != null && !companyName.trim().isEmpty()) {
                 EncryptionHelper.getInstance(this).saveReceiverUsername(companyName);
+            }
+            if (senderUsername != null && !senderUsername.trim().isEmpty()) {
+                EncryptionHelper.getInstance(this).saveReceiverUsername(senderUsername);
             }
 
             // 3. Configure local secondary Firebase database
