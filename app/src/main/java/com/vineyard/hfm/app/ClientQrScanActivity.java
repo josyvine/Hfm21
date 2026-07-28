@@ -35,9 +35,15 @@ import com.google.mlkit.vision.barcode.BarcodeScanning;
 import com.google.mlkit.vision.barcode.common.Barcode;
 import com.google.mlkit.vision.common.InputImage;
 
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.firestore.FirebaseFirestore;
+
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -45,7 +51,7 @@ import java.util.concurrent.Executors;
 /**
  * Activity for the Receiver to scan the Sender's QR Code.
  * Handles both Option A (Network Pairing) and Option B (Instant File Drop) payloads automatically:
- * - Option A (NETWORK): Connects to Sender's Firebase database permanently and saves host name.
+ * - Option A (NETWORK): Connects to Sender's Firebase database permanently, registers presence on network_peers, and saves host name.
  * - Option B (INSTANT_DROP): Connects to Sender's DB and immediately launches DownloadService.
  */
 @androidx.camera.core.ExperimentalGetImage
@@ -53,6 +59,9 @@ public class ClientQrScanActivity extends ComponentActivity {
 
     private static final String TAG = "ClientQrScanActivity";
     private static final int PERMISSION_REQUEST_CAMERA = 2001;
+
+    private static final String[] ADJECTIVES = {"Red", "Blue", "Green", "Silent", "Fast", "Brave", "Ancient", "Wandering", "Golden", "Iron"};
+    private static final String[] NOUNS = {"Tiger", "Lion", "Eagle", "Fox", "Wolf", "River", "Mountain", "Star", "Comet", "Shadow"};
 
     private PreviewView viewFinder;
     private ImageButton btnBackScan;
@@ -234,10 +243,10 @@ public class ClientQrScanActivity extends ComponentActivity {
 
             // Save company/host name and sender username into local receiver username history
             if (companyName != null && !companyName.trim().isEmpty()) {
-                EncryptionHelper.getInstance(this).saveReceiverUsername(companyName);
+                EncryptionHelper.getInstance(this).saveReceiverUsername(companyName.trim());
             }
             if (senderUsername != null && !senderUsername.trim().isEmpty()) {
-                EncryptionHelper.getInstance(this).saveReceiverUsername(senderUsername);
+                EncryptionHelper.getInstance(this).saveReceiverUsername(senderUsername.trim());
             }
 
             // 3. Configure local secondary Firebase database
@@ -246,6 +255,9 @@ public class ClientQrScanActivity extends ComponentActivity {
             if (success) {
                 FirebaseManager.initialize(this);
                 EncryptionHelper.getInstance(this).saveUserRole("receiver");
+
+                // REGISTER PRESENCE IN FIRESTORE network_peers COLLECTION SO SENDER SEES US IN DROPDOWN
+                registerReceiverPresenceOnCloud(companyName);
 
                 runOnUiThread(() -> {
                     // Option A: Network Pairing Payload
@@ -283,10 +295,60 @@ public class ClientQrScanActivity extends ComponentActivity {
         }
     }
 
+    /**
+     * Registers this receiver's presence in the shared Firestore network_peers collection.
+     * This enables the Sender (Phone A) to query active network peers and display this device in the dropdown list automatically.
+     */
+    private void registerReceiverPresenceOnCloud(String networkName) {
+        try {
+            FirebaseApp clientApp = FirebaseApp.getInstance(FirebaseManager.CLIENT_APP_NAME);
+            FirebaseAuth clientAuth = FirebaseAuth.getInstance(clientApp);
+            FirebaseFirestore clientDb = FirebaseFirestore.getInstance(clientApp);
+
+            if (clientAuth.getCurrentUser() != null) {
+                publishPresenceDocument(clientAuth.getCurrentUser().getUid(), networkName, clientDb);
+            } else {
+                clientAuth.signInAnonymously().addOnCompleteListener(task -> {
+                    if (task.isSuccessful() && clientAuth.getCurrentUser() != null) {
+                        publishPresenceDocument(clientAuth.getCurrentUser().getUid(), networkName, clientDb);
+                    }
+                });
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error registering presence on cloud network_peers", e);
+        }
+    }
+
+    private void publishPresenceDocument(String uid, String networkName, FirebaseFirestore clientDb) {
+        String myUsername = generateUsernameFromUid(uid);
+
+        // Save self username locally
+        EncryptionHelper.getInstance(this).saveReceiverUsername(myUsername);
+
+        Map<String, Object> peerData = new HashMap<>();
+        peerData.put("username", myUsername);
+        peerData.put("networkName", networkName != null ? networkName : "");
+        peerData.put("lastSeen", System.currentTimeMillis());
+        peerData.put("deviceRole", "receiver");
+
+        clientDb.collection("network_peers").document(myUsername)
+                .set(peerData)
+                .addOnSuccessListener(aVoid -> Log.d(TAG, "Registered presence on network_peers: " + myUsername))
+                .addOnFailureListener(e -> Log.e(TAG, "Failed to register presence on network_peers", e));
+    }
+
+    private String generateUsernameFromUid(String uid) {
+        long hash = uid.hashCode();
+        int adjIndex = (int) (Math.abs(hash % ADJECTIVES.length));
+        int nounIndex = (int) (Math.abs((hash / ADJECTIVES.length) % NOUNS.length));
+        int number = (int) (Math.abs((hash / (ADJECTIVES.length * NOUNS.length)) % 100));
+        return ADJECTIVES[adjIndex] + "-" + NOUNS[nounIndex] + "-" + number;
+    }
+
     private void resetScanState(String errorMsg) {
         runOnUiThread(() -> {
             Toast.makeText(this, errorMsg, Toast.LENGTH_SHORT).show();
-            progressBar.setVisibility(View.GONE);
+            progressBar.setVisibility(View.VISIBLE);
             tvScanStatus.setText("Position the QR Code within the frame to connect.");
             isProcessing = false;
         });
