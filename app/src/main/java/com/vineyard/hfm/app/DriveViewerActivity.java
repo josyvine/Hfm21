@@ -109,8 +109,9 @@ public class DriveViewerActivity extends Activity implements DriveViewerAdapter.
     private boolean initializeDriveService() {
         GoogleSignInAccount account = GoogleSignIn.getLastSignedInAccount(this);
         if (account != null) {
+            // FIXED: Changed from DRIVE_FILE to DRIVE to match GoogleDriveManager & Google Cloud Console
             GoogleAccountCredential credential = GoogleAccountCredential.usingOAuth2(
-                    this, Collections.singleton(DriveScopes.DRIVE_FILE));
+                    this, Collections.singleton(DriveScopes.DRIVE));
             credential.setSelectedAccount(account.getAccount());
 
             driveService = new Drive.Builder(
@@ -176,12 +177,14 @@ public class DriveViewerActivity extends Activity implements DriveViewerAdapter.
 
                 } catch (IOException e) {
                     Log.e(TAG, "Failed to load Drive folder", e);
+                    final String exactError = e.getMessage() != null ? e.getMessage() : e.toString();
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
                             progressBar.setVisibility(View.GONE);
                             emptyViewText.setVisibility(View.VISIBLE);
-                            emptyViewText.setText("Network error. Could not fetch files.");
+                            // Prints exact server error instead of generic network error
+                            emptyViewText.setText("Drive Error:\n" + exactError);
                         }
                     });
                 }
