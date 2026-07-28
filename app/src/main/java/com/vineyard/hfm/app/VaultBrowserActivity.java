@@ -79,10 +79,10 @@ public class VaultBrowserActivity extends Activity {
                         originalName = rawName.substring(rawName.indexOf("_") + 1);
                     }
                     
-                    Toast.makeText(VaultBrowserActivity.this, "Opening Secure Playback...", Toast.LENGTH_SHORT).show();
+                    String actionLabel = secureVaultManager.getActionLabel(originalName);
+                    Toast.makeText(VaultBrowserActivity.this, "Executing: " + actionLabel + "...", Toast.LENGTH_SHORT).show();
                     
-                    // Call the backend engine
-                    // Logic updated in SecureVaultManager.java to show Choice Dialog
+                    // Call the context-aware backend engine (Glitch 2 Fix)
                     secureVaultManager.playSecurely(file, originalName);
                 }
             });
