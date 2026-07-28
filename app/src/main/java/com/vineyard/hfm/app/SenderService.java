@@ -37,14 +37,16 @@ import com.google.firebase.firestore.ListenerRegistration;
 import java.io.File;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 /**
  * Service handling file encryption, polymorphic sharding, Google Drive upload,
- * and handshake creation on the Sender's private Client Firebase database.
- * Automatically launches Option B Instant Drop QR Code upon handshake creation.
+ * and batch handshake creation on the Sender's private Client Firebase database.
+ * Supports paired network direct transfer (no QR) and single-QR batch instant drop.
  */
 public class SenderService extends Service {
 
@@ -54,6 +56,7 @@ public class SenderService extends Service {
 
     public static final String ACTION_START_SEND = "com.vineyard.hfm.app.action.START_SEND";
     public static final String EXTRA_FILE_PATH = "file_path";
+    public static final String EXTRA_FILE_PATHS = "file_paths";
     public static final String EXTRA_RECEIVER_USERNAME = "receiver_username";
     public static final String EXTRA_SECRET_NUMBER = "secret_number";
 
@@ -71,7 +74,6 @@ public class SenderService extends Service {
     public void onCreate() {
         super.onCreate();
         
-        // Target the secondary Client Firebase instance ("client_hfm_app")
         try {
             FirebaseApp clientApp = FirebaseApp.getInstance(FirebaseManager.CLIENT_APP_NAME);
             mAuth = FirebaseAuth.getInstance(clientApp);
@@ -90,9 +92,19 @@ public class SenderService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_START_SEND.equals(intent.getAction())) {
-            final String filePath = intent.getStringExtra(EXTRA_FILE_PATH);
             final String receiverUsername = intent.getStringExtra(EXTRA_RECEIVER_USERNAME);
             final String secretNumber = intent.getStringExtra(EXTRA_SECRET_NUMBER);
+
+            ArrayList<String> filePaths = intent.getStringArrayListExtra(EXTRA_FILE_PATHS);
+            if (filePaths == null || filePaths.isEmpty()) {
+                String singlePath = intent.getStringExtra(EXTRA_FILE_PATH);
+                if (singlePath != null && !singlePath.isEmpty()) {
+                    filePaths = new ArrayList<>();
+                    filePaths.add(singlePath);
+                }
+            }
+
+            final ArrayList<String> finalFilePaths = filePaths;
 
             Notification notification = buildNotification("Initializing Secure Drop...", true);
             startForeground(NOTIFICATION_ID, notification);
@@ -105,19 +117,39 @@ public class SenderService extends Service {
             new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    startSenderProcess(filePath, receiverUsername, secretNumber);
+                    startSenderBatchProcess(finalFilePaths, receiverUsername, secretNumber);
                 }
             }).start();
         }
         return START_NOT_STICKY;
     }
 
-    private void startSenderProcess(final String filePath, final String receiverUsername, final String secretNumber) {
-        final File inputFile = new File(filePath);
-        if (!inputFile.exists()) {
-            broadcastError("File not found at path: " + filePath);
+    private void startSenderBatchProcess(final ArrayList<String> filePaths, final String receiverUsername, final String secretNumber) {
+        if (filePaths == null || filePaths.isEmpty()) {
+            broadcastError("Error: No valid file paths provided for transfer.");
             stopServiceAndCleanup(null);
             return;
+        }
+
+        List<File> inputFiles = new ArrayList<>();
+        long totalBatchSize = 0;
+        for (String path : filePaths) {
+            File f = new File(path);
+            if (f.exists()) {
+                inputFiles.add(f);
+                totalBatchSize += f.length();
+            }
+        }
+
+        if (inputFiles.isEmpty()) {
+            broadcastError("Error: Selected files do not exist on disk.");
+            stopServiceAndCleanup(null);
+            return;
+        }
+
+        // Save target receiver username to preferences history
+        if (receiverUsername != null && !receiverUsername.trim().isEmpty()) {
+            EncryptionHelper.getInstance(this).saveReceiverUsername(receiverUsername.trim());
         }
 
         // Phase 1: Authentication & Smart Quota Check
@@ -132,36 +164,53 @@ public class SenderService extends Service {
         broadcastStatus("Verifying Cloud Storage...", "Please wait...", -1, -1, -1);
         GoogleDriveManager driveManager = new GoogleDriveManager(this, driveAccount);
 
-        if (!driveManager.hasEnoughQuota(inputFile.length())) {
-            broadcastError("Not enough Google Drive space. Required: " + Formatter.formatFileSize(this, (long) (inputFile.length() * 1.1)) + " + decoys.");
+        if (!driveManager.hasEnoughQuota(totalBatchSize)) {
+            broadcastError("Not enough Google Drive space. Required: " + Formatter.formatFileSize(this, (long) (totalBatchSize * 1.1)) + " + decoys.");
             stopServiceAndCleanup(null);
             return;
         }
 
-        // Phase 2: Polymorphic Sharding & Encryption
+        // Phase 2: Polymorphic Sharding & Encryption for Batch Items
         MorphedShardEngine shardEngine = new MorphedShardEngine(this, driveManager);
-        String encryptedManifestId = shardEngine.executeShardingAndUpload(inputFile, secretNumber, new MorphedShardEngine.ProgressListener() {
-            @Override
-            public void onProgress(int progress, int max, long bytesProcessed) {
-                updateNotification("Encrypting & Uploading... " + progress + "%", true);
-                broadcastStatus("Morphing Data...",
-                        String.format(Locale.US, "%s / %s",
-                                Formatter.formatFileSize(getApplicationContext(), bytesProcessed),
-                                Formatter.formatFileSize(getApplicationContext(), inputFile.length())),
-                        progress, max, bytesProcessed);
+        List<Map<String, Object>> fileManifestList = new ArrayList<>();
+        int totalFiles = inputFiles.size();
+
+        for (int i = 0; i < totalFiles; i++) {
+            final File currentFile = inputFiles.get(i);
+            final int fileIndex = i + 1;
+
+            updateNotification("Sharding (" + fileIndex + "/" + totalFiles + "): " + currentFile.getName(), true);
+            broadcastStatus("Morphing Data (" + fileIndex + "/" + totalFiles + ")", currentFile.getName(), 0, 100, 0);
+
+            String encryptedManifestId = shardEngine.executeShardingAndUpload(currentFile, secretNumber, new MorphedShardEngine.ProgressListener() {
+                @Override
+                public void onProgress(int progress, int max, long bytesProcessed) {
+                    updateNotification("Encrypting (" + fileIndex + "/" + totalFiles + ") " + progress + "%", true);
+                    broadcastStatus("Morphing Data (" + fileIndex + "/" + totalFiles + ")",
+                            String.format(Locale.US, "%s / %s",
+                                    Formatter.formatFileSize(getApplicationContext(), bytesProcessed),
+                                    Formatter.formatFileSize(getApplicationContext(), currentFile.length())),
+                            progress, max, bytesProcessed);
+                }
+
+                @Override
+                public void onStatusUpdate(String minorStatus) {
+                    updateNotification(minorStatus, true);
+                    broadcastStatus("Morphing Data (" + fileIndex + "/" + totalFiles + ")", minorStatus, -1, -1, -1);
+                }
+            });
+
+            if (encryptedManifestId == null) {
+                broadcastError("Failed to shard and upload " + currentFile.getName() + " to Google Drive.");
+                stopServiceAndCleanup(null);
+                return;
             }
 
-            @Override
-            public void onStatusUpdate(String minorStatus) {
-                updateNotification(minorStatus, true);
-                broadcastStatus("Morphing Data...", minorStatus, -1, -1, -1);
-            }
-        });
-
-        if (encryptedManifestId == null) {
-            broadcastError("Failed to shard and upload the file to Google Drive.");
-            stopServiceAndCleanup(null);
-            return;
+            Map<String, Object> fileMeta = new HashMap<>();
+            fileMeta.put("originalFilename", currentFile.getName());
+            fileMeta.put("filesize", currentFile.length());
+            fileMeta.put("encryptedManifestId", encryptedManifestId);
+            fileManifestList.add(fileMeta);
         }
 
         // Phase 3: Firebase Handshake on Client Database
@@ -171,13 +220,17 @@ public class SenderService extends Service {
         String currentUid = (currentUser != null) ? currentUser.getUid() : "anon_" + System.currentTimeMillis();
         String senderUsername = generateUsernameFromUid(currentUid);
 
+        String summaryFilename = (totalFiles == 1) ? inputFiles.get(0).getName() : totalFiles + " files batch";
+        String primaryManifestId = (String) fileManifestList.get(0).get("encryptedManifestId");
+
         Map<String, Object> dropRequest = new HashMap<>();
         dropRequest.put("senderId", currentUid);
         dropRequest.put("senderUsername", senderUsername);
-        dropRequest.put("receiverUsername", receiverUsername != null ? receiverUsername : "ANY");
-        dropRequest.put("originalFilename", inputFile.getName());
-        dropRequest.put("encryptedManifestId", encryptedManifestId);
-        dropRequest.put("filesize", inputFile.length());
+        dropRequest.put("receiverUsername", receiverUsername != null ? receiverUsername.trim() : "ANY");
+        dropRequest.put("originalFilename", summaryFilename);
+        dropRequest.put("encryptedManifestId", primaryManifestId);
+        dropRequest.put("filesize", totalBatchSize);
+        dropRequest.put("fileItems", fileManifestList); // Full batch items list
         dropRequest.put("status", "pending");
         dropRequest.put("timestamp", System.currentTimeMillis());
 
@@ -186,10 +239,17 @@ public class SenderService extends Service {
                 @Override
                 public void onSuccess(DocumentReference documentReference) {
                     dropRequestId = documentReference.getId();
-                    Log.d(TAG, "Drop request created on Client Firestore with ID: " + dropRequestId);
+                    Log.d(TAG, "Batch Drop request created on Client Firestore with ID: " + dropRequestId);
                     
-                    // OPTION B TRIGGER: Display Instant Drop QR Code automatically for Receiver to scan
-                    launchInstantDropQrActivity(dropRequestId, secretNumber, inputFile.getName(), inputFile.length());
+                    // GLITCH 1 & 4 FIX: Check if receiver is paired via Permanent QR Code
+                    boolean isPairedReceiver = EncryptionHelper.getInstance(SenderService.this).isReceiverPaired(receiverUsername);
+
+                    if (!isPairedReceiver && (receiverUsername == null || receiverUsername.trim().isEmpty() || "ANY".equalsIgnoreCase(receiverUsername.trim()))) {
+                        // Launch Instant Drop QR Code ONLY for unpaired/one-time instant drop receivers
+                        launchInstantDropQrActivity(dropRequestId, secretNumber, summaryFilename, totalBatchSize);
+                    } else {
+                        Log.d(TAG, "Target receiver '" + receiverUsername + "' is paired on Permanent Network. Bypassing QR Code display.");
+                    }
 
                     updateNotification("Waiting for receiver...", true);
                     broadcastStatus("Waiting for Receiver...", "Request sent. Waiting for acceptance.", -1, -1, -1);
@@ -206,10 +266,6 @@ public class SenderService extends Service {
             });
     }
 
-    /**
-     * Launches ClientQrGenerateActivity in Option B (INSTANT_DROP) mode
-     * so the Sender can present the Instant Drop QR Code directly on screen.
-     */
     private void launchInstantDropQrActivity(String dropRequestId, String secretNumber, String fileName, long fileSize) {
         try {
             Intent qrIntent = new Intent(this, ClientQrGenerateActivity.class);
