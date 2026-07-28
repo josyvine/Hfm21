@@ -50,7 +50,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Activity for listening to and accepting incoming HFM Drop requests.
+ * Activity for listening to and accepting incoming single and batch HFM Drop requests.
  * INTEGRATED CONTROL CENTER:
  * - Redirects all Firestore queries and updates directly to secondary "client_hfm_app" instance.
  * - Provides inline setup options (Upload JSON, My QR Code, Scan QR Code) directly inside the HFM Drop feature.
@@ -361,7 +361,7 @@ public class HFMDropActivity extends Activity {
             usernameTextView.setText(username);
             regenerateIdButton.setEnabled(true);
 
-            // Automatically save self username to history
+            // GLITCH 3 FIX: Automatically save self username to local history
             EncryptionHelper.getInstance(this).saveReceiverUsername(username);
 
             listenForDropRequests(username);
@@ -405,8 +405,8 @@ public class HFMDropActivity extends Activity {
                             request.id = dc.getDocument().getId();
                             requestList.add(request);
 
-                            // Save sender username into local username history when a request arrives
-                            if (request.senderUsername != null) {
+                            // GLITCH 3 FIX: Save sender username to local history when a request arrives
+                            if (request.senderUsername != null && !request.senderUsername.trim().isEmpty()) {
                                 EncryptionHelper.getInstance(HFMDropActivity.this).saveReceiverUsername(request.senderUsername);
                             }
                         }
@@ -521,6 +521,7 @@ public class HFMDropActivity extends Activity {
         public long filesize;
         public String status;
         public String encryptedManifestId;
+        public List<Map<String, Object>> fileItems; // Supports batch multi-file requests
 
         public DropRequest() {}
     }
