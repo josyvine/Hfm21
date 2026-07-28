@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Environment;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -35,7 +36,7 @@ import java.util.UUID;
 /**
  * Phase 5: Hidden Vault & Secure Playback
  * Manages the secure local storage of reconstructed files and provides a secure,
- * temporary playback mechanism with a LifecycleObserver Kill-Switch.
+ * context-aware playback and execution mechanism with a LifecycleObserver Kill-Switch.
  */
 public class SecureVaultManager {
 
@@ -78,6 +79,30 @@ public class SecureVaultManager {
     }
 
     /**
+     * Context-aware action resolver for incoming and vault files.
+     * Resolves appropriate button text ("Extract", "Install App", "Play Video", etc.) for Glitch 2.
+     */
+    public String getActionLabel(String originalFileName) {
+        if (originalFileName == null) return "Open File";
+        String ext = getExtension(originalFileName);
+
+        if (isArchive(ext)) {
+            return "Extract Archive";
+        } else if (isPackage(ext)) {
+            return "Install App";
+        } else if (isVideo(ext)) {
+            return "Play Video";
+        } else if (isImage(ext)) {
+            return "View Image";
+        } else if (isAudio(ext)) {
+            return "Play Audio";
+        } else if (isTextOrCode(ext) || ext.equals("pdf")) {
+            return "Read Document";
+        }
+        return "Open File";
+    }
+
+    /**
      * MAIN ENTRY POINT: Updated to show Choice Dialog (Internal vs External)
      */
     public void playSecurely(final File vaultFile, final String originalFileName) {
@@ -86,9 +111,20 @@ public class SecureVaultManager {
             return;
         }
 
+        String ext = getExtension(originalFileName);
+
+        // Direct Execution for Archives and Packages
+        if (isArchive(ext)) {
+            handleArchiveExtraction(vaultFile, originalFileName);
+            return;
+        } else if (isPackage(ext)) {
+            handlePackageInstallation(vaultFile, originalFileName);
+            return;
+        }
+
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle("Secure Playback");
-        builder.setMessage("How would you like to play this file?");
+        builder.setTitle("Secure Open: " + originalFileName);
+        builder.setMessage("How would you like to handle this file?");
 
         builder.setPositiveButton("RAM Mode (Internal)", new DialogInterface.OnClickListener() {
             @Override
@@ -97,7 +133,7 @@ public class SecureVaultManager {
             }
         });
 
-        builder.setNeutralButton("External Player", new DialogInterface.OnClickListener() {
+        builder.setNeutralButton("External Application", new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int which) {
                 handleExternalPlayback(vaultFile, originalFileName);
@@ -106,6 +142,50 @@ public class SecureVaultManager {
 
         builder.setNegativeButton("Cancel", null);
         builder.show();
+    }
+
+    /**
+     * Handles unzipping and extraction of received ZIP/RAR archives directly.
+     */
+    private void handleArchiveExtraction(File vaultFile, String originalFileName) {
+        File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        File extractTargetFolder = new File(downloadDir, "Extracted_" + removeExtension(originalFileName));
+        if (!extractTargetFolder.exists()) {
+            extractTargetFolder.mkdirs();
+        }
+
+        Toast.makeText(context, "Extracting to Downloads/" + extractTargetFolder.getName(), Toast.LENGTH_LONG).show();
+        ArchiveUtils.extractArchive(context, vaultFile, extractTargetFolder);
+    }
+
+    /**
+     * Handles direct installation of received APK files.
+     */
+    private void handlePackageInstallation(File vaultFile, String originalFileName) {
+        try {
+            File tempCacheDir = new File(context.getCacheDir(), TEMP_PLAYBACK_DIR);
+            if (!tempCacheDir.exists()) tempCacheDir.mkdirs();
+
+            File tempApkFile = new File(tempCacheDir, originalFileName);
+            copyToCache(vaultFile, tempApkFile);
+
+            Uri apkUri = FileProvider.getUriForFile(
+                    context,
+                    "com.vineyard.hfm.app.provider",
+                    tempApkFile
+            );
+
+            Intent installIntent = new Intent(Intent.ACTION_VIEW);
+            installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            context.startActivity(installIntent);
+            activatePlaybackKillSwitch(tempApkFile);
+
+        } catch (Exception e) {
+            showDetailedErrorDialog("Package Installation Error", e);
+        }
     }
 
     /**
@@ -149,7 +229,7 @@ public class SecureVaultManager {
                 context.startActivity(intent);
             }
         } catch (Exception e) {
-            showDetailedErrorDialog("Internal Playback Error", e);
+            showDetailedErrorDialog("Internal Viewer Error", e);
         }
     }
 
@@ -164,10 +244,8 @@ public class SecureVaultManager {
         final File tempPlayFile = new File(tempCacheDir, originalFileName);
 
         try {
-            // Your original 8192-byte buffer loop logic
             copyToCache(vaultFile, tempPlayFile);
 
-            // Generate URI via FileProvider
             Uri fileUri = FileProvider.getUriForFile(
                     context, 
                     "com.vineyard.hfm.app.provider", 
@@ -181,9 +259,8 @@ public class SecureVaultManager {
             playIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             playIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
-            context.startActivity(playIntent);
+            context.startActivity(Intent.createChooser(playIntent, "Open " + originalFileName + " via:").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
 
-            // Activate modified Kill-Switch to prevent race condition
             activatePlaybackKillSwitch(tempPlayFile);
 
         } catch (Exception e) {
@@ -193,7 +270,7 @@ public class SecureVaultManager {
 
     /**
      * THE KILL-SWITCH: Monitors the app's lifecycle via ProcessLifecycleOwner.
-     * FIX: Added 'hasLeftApp' check to prevent immediate shredding when the player/menu opens.
+     * Prevents race conditions and shreds temp cache upon return to HFM.
      */
     private void activatePlaybackKillSwitch(final File tempFile) {
         ProcessLifecycleOwner.get().getLifecycle().addObserver(new DefaultLifecycleObserver() {
@@ -201,13 +278,11 @@ public class SecureVaultManager {
 
             @Override
             public void onStop(LifecycleOwner owner) {
-                // Triggered when the user leaves HFM (to the Player or Resolver Menu)
                 hasLeftApp = true;
             }
 
             @Override
             public void onStart(LifecycleOwner owner) {
-                // Triggered when the user returns to HFM
                 if (hasLeftApp) {
                     Log.d(TAG, "Kill-Switch Activated: Shredding secure cache file.");
                     shredFile(tempFile);
@@ -218,14 +293,13 @@ public class SecureVaultManager {
     }
 
     /**
-     * FORENSIC SHREDDER: Your original logic to zero out file bytes.
+     * FORENSIC SHREDDER: Overwrites file bytes with zeroes before deleting.
      */
     private void shredFile(File file) {
         if (file == null || !file.exists()) return;
         try {
             long length = file.length();
             FileOutputStream fos = new FileOutputStream(file);
-            // Original 8192-byte zeroes loop
             byte[] zeroes = new byte[8192];
             long written = 0;
             while (written < length) {
@@ -243,9 +317,6 @@ public class SecureVaultManager {
         }
     }
 
-    /**
-     * Your original 8192-byte buffer copy logic.
-     */
     private void copyToCache(File source, File dest) throws IOException {
         InputStream in = new FileInputStream(source);
         OutputStream out = new FileOutputStream(dest);
@@ -258,9 +329,6 @@ public class SecureVaultManager {
         out.close();
     }
 
-    /**
-     * ADVANCED ERROR REPORTING: Displays full Java StackTrace in scrollable dialog.
-     */
     private void showDetailedErrorDialog(String title, Exception e) {
         StringWriter sw = new StringWriter();
         PrintWriter pw = new PrintWriter(sw);
@@ -270,7 +338,6 @@ public class SecureVaultManager {
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
         builder.setTitle(title);
 
-        // Scrollable TextView for the stacktrace
         final TextView errorTextView = new TextView(context);
         errorTextView.setText(detailedError);
         errorTextView.setPadding(40, 40, 40, 40);
@@ -300,6 +367,12 @@ public class SecureVaultManager {
         return "";
     }
 
+    private String removeExtension(String fileName) {
+        int lastDot = fileName.lastIndexOf('.');
+        if (lastDot > 0) return fileName.substring(0, lastDot);
+        return fileName;
+    }
+
     private boolean isImage(String ext) {
         return Arrays.asList("jpg", "jpeg", "png", "gif", "bmp", "webp").contains(ext);
     }
@@ -310,6 +383,21 @@ public class SecureVaultManager {
 
     private boolean isAudio(String ext) {
         return Arrays.asList("mp3", "wav", "ogg", "m4a", "aac", "flac").contains(ext);
+    }
+
+    private boolean isArchive(String ext) {
+        return Arrays.asList("zip", "rar", "7z", "tar", "gz").contains(ext);
+    }
+
+    private boolean isPackage(String ext) {
+        return "apk".equals(ext);
+    }
+
+    private boolean isTextOrCode(String ext) {
+        return Arrays.asList("txt", "log", "csv", "json", "xml", "html", "js", "css",
+                "java", "kt", "py", "c", "cpp", "h", "cs", "php", "rb", "go",
+                "swift", "sh", "bat", "ps1", "ini", "cfg", "conf", "md", "rtf",
+                "prop", "gradle", "pro", "sql").contains(ext);
     }
 
     private String getMimeType(String fileName) {
