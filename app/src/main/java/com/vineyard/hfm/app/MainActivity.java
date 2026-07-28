@@ -340,22 +340,10 @@ public class MainActivity extends Activity {
         LayoutInflater inflater = this.getLayoutInflater();
         View dialogView = inflater.inflate(R.layout.dialog_send_drop, null);
         
-        final EditText receiverInputView = dialogView.findViewById(R.id.edit_text_receiver_username);
+        final AutoCompleteTextView receiverInputView = dialogView.findViewById(R.id.edit_text_receiver_username);
 
-        // Fetch saved receiver usernames history
-        List<String> savedUsernames = EncryptionHelper.getInstance(this).getSavedUsernames();
-
-        if (receiverInputView instanceof AutoCompleteTextView && !savedUsernames.isEmpty()) {
-            AutoCompleteTextView autoComplete = (AutoCompleteTextView) receiverInputView;
-            ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_dropdown_item_1line, savedUsernames);
-            autoComplete.setAdapter(adapter);
-            autoComplete.setThreshold(1);
-            autoComplete.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus && !savedUsernames.isEmpty()) {
-                    autoComplete.showDropDown();
-                }
-            });
-        }
+        // GLITCH 3 FIX: Bind Auto-Complete suggestion list from EncryptionHelper
+        EncryptionHelper.getInstance(this).setupAutoComplete(this, receiverInputView);
 
         builder.setView(dialogView)
                 .setPositiveButton("Send", new DialogInterface.OnClickListener() {
@@ -365,7 +353,7 @@ public class MainActivity extends Activity {
                         if (receiverUsername.isEmpty()) {
                             Toast.makeText(MainActivity.this, "Receiver username cannot be empty.", Toast.LENGTH_SHORT).show();
                         } else {
-                            // Save receiver username to persistent local history
+                            // GLITCH 3 FIX: Save receiver username to persistent local history
                             EncryptionHelper.getInstance(MainActivity.this).saveReceiverUsername(receiverUsername);
                             showSenderWarningDialog(receiverUsername);
                         }
@@ -395,21 +383,20 @@ public class MainActivity extends Activity {
 
     private void startSenderService(String receiverUsername, String secretNumber) {
         if (filesToSendViaDrop == null || filesToSendViaDrop.isEmpty()) {
-            Toast.makeText(this, "Error: No file selected to send.", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Error: No files selected to send.", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        // Save username to local memory history
+        // GLITCH 3 FIX: Save username to persistent history
         EncryptionHelper.getInstance(this).saveReceiverUsername(receiverUsername);
 
-        for (String filePath : filesToSendViaDrop) {
-            Intent intent = new Intent(this, SenderService.class);
-            intent.setAction(SenderService.ACTION_START_SEND);
-            intent.putExtra(SenderService.EXTRA_FILE_PATH, filePath);
-            intent.putExtra(SenderService.EXTRA_RECEIVER_USERNAME, receiverUsername);
-            intent.putExtra(SenderService.EXTRA_SECRET_NUMBER, secretNumber);
-            ContextCompat.startForegroundService(this, intent);
-        }
+        // GLITCH 4 FIX: Send all selected files in a single batch intent extra
+        Intent intent = new Intent(this, SenderService.class);
+        intent.setAction(SenderService.ACTION_START_SEND);
+        intent.putStringArrayListExtra(SenderService.EXTRA_FILE_PATHS, filesToSendViaDrop);
+        intent.putExtra(SenderService.EXTRA_RECEIVER_USERNAME, receiverUsername);
+        intent.putExtra(SenderService.EXTRA_SECRET_NUMBER, secretNumber);
+        ContextCompat.startForegroundService(this, intent);
 
         filesToSendViaDrop = null;
     }
