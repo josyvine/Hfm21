@@ -18,6 +18,8 @@ import android.view.View;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.widget.ArrayAdapter;
+import android.widget.AutoCompleteTextView;
 import android.widget.EditText;
 import android.widget.Toast;
 
@@ -329,20 +331,42 @@ public class MainActivity extends Activity {
         return sb.toString();
     }
 
+    /**
+     * Displays the "Send File via Drop" dialog with an Auto-Complete Dropdown
+     * populated with previously saved receiver usernames.
+     */
     private void showSendToDropDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         LayoutInflater inflater = this.getLayoutInflater();
         View dialogView = inflater.inflate(R.layout.dialog_send_drop, null);
-        final EditText receiverUsernameInput = dialogView.findViewById(R.id.edit_text_receiver_username);
+        
+        final EditText receiverInputView = dialogView.findViewById(R.id.edit_text_receiver_username);
+
+        // Fetch saved receiver usernames history
+        List<String> savedUsernames = EncryptionHelper.getInstance(this).getSavedUsernames();
+
+        if (receiverInputView instanceof AutoCompleteTextView && !savedUsernames.isEmpty()) {
+            AutoCompleteTextView autoComplete = (AutoCompleteTextView) receiverInputView;
+            ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_dropdown_item_1line, savedUsernames);
+            autoComplete.setAdapter(adapter);
+            autoComplete.setThreshold(1);
+            autoComplete.setOnFocusChangeListener((v, hasFocus) -> {
+                if (hasFocus && !savedUsernames.isEmpty()) {
+                    autoComplete.showDropDown();
+                }
+            });
+        }
 
         builder.setView(dialogView)
                 .setPositiveButton("Send", new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int id) {
-                        String receiverUsername = receiverUsernameInput.getText().toString().trim();
+                        String receiverUsername = receiverInputView.getText().toString().trim();
                         if (receiverUsername.isEmpty()) {
                             Toast.makeText(MainActivity.this, "Receiver username cannot be empty.", Toast.LENGTH_SHORT).show();
                         } else {
+                            // Save receiver username to persistent local history
+                            EncryptionHelper.getInstance(MainActivity.this).saveReceiverUsername(receiverUsername);
                             showSenderWarningDialog(receiverUsername);
                         }
                     }
@@ -374,6 +398,9 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "Error: No file selected to send.", Toast.LENGTH_SHORT).show();
             return;
         }
+
+        // Save username to local memory history
+        EncryptionHelper.getInstance(this).saveReceiverUsername(receiverUsername);
 
         for (String filePath : filesToSendViaDrop) {
             Intent intent = new Intent(this, SenderService.class);
@@ -553,8 +580,6 @@ public class MainActivity extends Activity {
             Intent intent = new Intent(mContext, HFMDropActivity.class);
             mContext.startActivity(intent);
         }
-
-        // JAVASCRIPT INTERFACE METHODS FOR CENTRAL CONFIG & QR SYSTEM (CALLED FROM DROP MODAL)
 
         @JavascriptInterface
         public void openSetup() {
