@@ -53,6 +53,7 @@ import java.util.Map;
  * Activity for listening to and accepting incoming single and batch HFM Drop requests.
  * INTEGRATED CONTROL CENTER:
  * - Redirects all Firestore queries and updates directly to secondary "client_hfm_app" instance.
+ * - Registers local device presence to Firestore network_peers collection.
  * - Provides inline setup options (Upload JSON, My QR Code, Scan QR Code) directly inside the HFM Drop feature.
  */
 public class HFMDropActivity extends Activity {
@@ -361,11 +362,30 @@ public class HFMDropActivity extends Activity {
             usernameTextView.setText(username);
             regenerateIdButton.setEnabled(true);
 
-            // GLITCH 3 FIX: Automatically save self username to local history
+            // Automatically save self username to local preferences
             EncryptionHelper.getInstance(this).saveReceiverUsername(username);
+
+            // PUBLISH PRESENCE TO FIRESTORE network_peers COLLECTION SO SENDER SEES US IN DROPDOWN
+            publishPresenceToCloud(username);
 
             listenForDropRequests(username);
         }
+    }
+
+    /**
+     * Publishes presence document to network_peers collection on secondary Client Firestore.
+     */
+    private void publishPresenceToCloud(String username) {
+        if (db == null) return;
+        Map<String, Object> peerData = new HashMap<>();
+        peerData.put("username", username);
+        peerData.put("lastSeen", System.currentTimeMillis());
+        peerData.put("deviceRole", "receiver");
+
+        db.collection("network_peers").document(username)
+                .set(peerData)
+                .addOnSuccessListener(aVoid -> Log.d(TAG, "Registered self presence on network_peers: " + username))
+                .addOnFailureListener(e -> Log.e(TAG, "Failed to publish presence to network_peers", e));
     }
 
     private String generateUsernameFromUid(String uid) {
@@ -405,7 +425,7 @@ public class HFMDropActivity extends Activity {
                             request.id = dc.getDocument().getId();
                             requestList.add(request);
 
-                            // GLITCH 3 FIX: Save sender username to local history when a request arrives
+                            // Save sender username to local history when a request arrives
                             if (request.senderUsername != null && !request.senderUsername.trim().isEmpty()) {
                                 EncryptionHelper.getInstance(HFMDropActivity.this).saveReceiverUsername(request.senderUsername);
                             }
@@ -521,7 +541,7 @@ public class HFMDropActivity extends Activity {
         public long filesize;
         public String status;
         public String encryptedManifestId;
-        public List<Map<String, Object>> fileItems; // Supports batch multi-file requests
+        public List<Map<String, Object>> fileItems;
 
         public DropRequest() {}
     }
