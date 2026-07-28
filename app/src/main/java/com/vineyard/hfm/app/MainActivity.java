@@ -3,6 +3,8 @@ package com.vineyard.hfm.app;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -333,7 +335,7 @@ public class MainActivity extends Activity {
 
     /**
      * Displays the "Send File via Drop" dialog with an Auto-Complete Dropdown
-     * populated with previously saved receiver usernames.
+     * populated with live cloud network peers + local preferences.
      */
     private void showSendToDropDialog() {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
@@ -342,7 +344,7 @@ public class MainActivity extends Activity {
         
         final AutoCompleteTextView receiverInputView = dialogView.findViewById(R.id.edit_text_receiver_username);
 
-        // GLITCH 3 FIX: Bind Auto-Complete suggestion list from EncryptionHelper
+        // Bind Auto-Complete suggestion list from EncryptionHelper (Queries cloud network_peers + local history)
         EncryptionHelper.getInstance(this).setupAutoComplete(this, receiverInputView);
 
         builder.setView(dialogView)
@@ -353,9 +355,9 @@ public class MainActivity extends Activity {
                         if (receiverUsername.isEmpty()) {
                             Toast.makeText(MainActivity.this, "Receiver username cannot be empty.", Toast.LENGTH_SHORT).show();
                         } else {
-                            // GLITCH 3 FIX: Save receiver username to persistent local history
+                            // Save receiver username to persistent local history
                             EncryptionHelper.getInstance(MainActivity.this).saveReceiverUsername(receiverUsername);
-                            showSenderWarningDialog(receiverUsername);
+                            showSenderWarningDialog(receiverUsername, null);
                         }
                     }
                 })
@@ -363,11 +365,11 @@ public class MainActivity extends Activity {
         builder.create().show();
     }
 
-    private void showSenderWarningDialog(final String receiverUsername) {
-        final String secretNumber = generateSecretNumber();
+    private void showSenderWarningDialog(final String receiverUsername, final String existingSecretNumber) {
+        final String secretNumber = (existingSecretNumber != null) ? existingSecretNumber : generateSecretNumber();
 
-        new AlertDialog.Builder(this)
-            .setTitle("Important: Connection Stability")
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Important: Connection Stability")
             .setMessage("You are about to act as a temporary server for this file transfer.\n\n"
                     + "Please keep the app open and maintain a stable internet connection until the transfer is complete.\n\n"
                     + "Your Secret Number for this transfer is:\n" + secretNumber + "\n\nShare this number with the receiver.")
@@ -377,8 +379,30 @@ public class MainActivity extends Activity {
                     startSenderService(receiverUsername, secretNumber);
                 }
             })
-            .setNegativeButton("Cancel", null)
-            .show();
+            .setNeutralButton("Copy PIN", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (clipboard != null) {
+                        ClipData clip = ClipData.newPlainText("Secret PIN", secretNumber);
+                        clipboard.setPrimaryClip(clip);
+                        Toast.makeText(MainActivity.this, "Secret PIN copied to clipboard!", Toast.LENGTH_SHORT).show();
+                    }
+                    showSenderWarningDialog(receiverUsername, secretNumber);
+                }
+            })
+            .setNegativeButton("Share PIN", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                    shareIntent.setType("text/plain");
+                    shareIntent.putExtra(Intent.EXTRA_SUBJECT, "HFM Drop Secret PIN");
+                    shareIntent.putExtra(Intent.EXTRA_TEXT, "Here is the Secret PIN for our HFM Drop file transfer: " + secretNumber);
+                    startActivity(Intent.createChooser(shareIntent, "Share Secret PIN via:"));
+                    showSenderWarningDialog(receiverUsername, secretNumber);
+                }
+            });
+        builder.create().show();
     }
 
     private void startSenderService(String receiverUsername, String secretNumber) {
@@ -387,10 +411,10 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // GLITCH 3 FIX: Save username to persistent history
+        // Save username to persistent history
         EncryptionHelper.getInstance(this).saveReceiverUsername(receiverUsername);
 
-        // GLITCH 4 FIX: Send all selected files in a single batch intent extra
+        // Send all selected files in a single batch intent extra
         Intent intent = new Intent(this, SenderService.class);
         intent.setAction(SenderService.ACTION_START_SEND);
         intent.putStringArrayListExtra(SenderService.EXTRA_FILE_PATHS, filesToSendViaDrop);
