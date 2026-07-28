@@ -32,7 +32,7 @@ import java.io.IOException;
 /**
  * Activity for the Sender to generate and display encrypted QR Codes for:
  * 1. Option A (NETWORK): One-Time Network Pairing (generated before file upload).
- * 2. Option B (INSTANT_DROP): Direct One-Step File Drop (generated after file upload & sharding).
+ * 2. Option B (INSTANT_DROP): Direct One-Step Single/Batch File Drop (generated after upload & sharding).
  */
 public class ClientQrGenerateActivity extends ComponentActivity {
 
@@ -217,13 +217,11 @@ public class ClientQrGenerateActivity extends ComponentActivity {
             @Override
             public void run() {
                 try {
-                    // Encrypt plain JSON payload into AES-256 Base64 string
                     String encryptedPayload = EncryptionHelper.getInstance(ClientQrGenerateActivity.this)
                             .encryptQrPayload(plainJsonPayload);
 
                     if (encryptedPayload != null) {
                         MultiFormatWriter multiFormatWriter = new MultiFormatWriter();
-                        // 512x512 QR Code
                         BitMatrix bitMatrix = multiFormatWriter.encode(encryptedPayload, BarcodeFormat.QR_CODE, 512, 512);
                         BarcodeEncoder barcodeEncoder = new BarcodeEncoder();
                         final Bitmap bitmap = barcodeEncoder.createBitmap(bitMatrix);
