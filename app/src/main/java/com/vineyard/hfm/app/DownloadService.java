@@ -35,13 +35,14 @@ import com.google.firebase.firestore.ListenerRegistration;
 import java.io.File;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Foreground Service responsible for fetching manifest details from the Client Firestore database,
  * downloading polymorphic encrypted shards from Google Drive, and reconstructing files into .vault.
- * DYNAMIC BYPASS:
- * - Redirects all Firestore reads, listeners, and status updates to the secondary named app instance ("client_hfm_app").
+ * Supports batch multi-file downloads and updates status to secondary Client Firestore ("client_hfm_app").
  */
 public class DownloadService extends Service {
 
@@ -58,7 +59,6 @@ public class DownloadService extends Service {
     public void onCreate() {
         super.onCreate();
         
-        // Target the secondary Client Firebase instance ("client_hfm_app")
         try {
             FirebaseApp clientApp = FirebaseApp.getInstance(FirebaseManager.CLIENT_APP_NAME);
             db = FirebaseFirestore.getInstance(clientApp);
@@ -77,7 +77,6 @@ public class DownloadService extends Service {
             final String currentDropRequestId = intent.getStringExtra("drop_request_id");
             String rawSecretNumber = intent.getStringExtra("secret_number"); 
             
-            // Sanitize Secret PIN to strip unwanted whitespace/line-breaks
             final String passedSecretNumber = (rawSecretNumber != null) ? rawSecretNumber.trim().replaceAll("\\s+", "") : null;
 
             Notification notification = buildNotification("Initializing Secure Drop...", true, 0, 0);
@@ -94,10 +93,7 @@ public class DownloadService extends Service {
     }
 
     private void startDownloadProcess(final String docId, final String secretNumber, final int startId) {
-        // Fetch drop request from Client Firestore Database
         final DocumentReference docRef = db.collection("drop_requests").document(docId);
-        
-        // Local snapshot listener for this transfer task
         final ListenerRegistration currentListener = listenForStatusChange(docRef, startId);
 
         docRef.get().addOnSuccessListener(new OnSuccessListener<DocumentSnapshot>() {
@@ -108,16 +104,6 @@ public class DownloadService extends Service {
                     stopServiceAndCleanup(null, startId, currentListener, docId);
                     return;
                 }
-                
-                final String encryptedManifestId = documentSnapshot.getString("encryptedManifestId");
-                final long originalFilesize = documentSnapshot.getLong("filesize");
-                final String fileNameFromServer = documentSnapshot.getString("originalFilename");
-
-                if (encryptedManifestId == null) {
-                    broadcastError("Error: Incomplete transfer details from server.");
-                    stopServiceAndCleanup(null, startId, currentListener, docId);
-                    return;
-                }
 
                 if (secretNumber == null || secretNumber.isEmpty()) {
                     broadcastError("Error: Secret Number missing from receiver session.");
@@ -125,7 +111,6 @@ public class DownloadService extends Service {
                     return;
                 }
 
-                // Authenticate with Google Drive via central credentials
                 GoogleSignInAccount driveAccount = GoogleSignIn.getLastSignedInAccount(DownloadService.this);
                 if (driveAccount == null) {
                     broadcastError("Google Drive authentication failed. Please sign in again.");
@@ -137,43 +122,91 @@ public class DownloadService extends Service {
                 final ReconstructionEngine reconstructionEngine = new ReconstructionEngine(DownloadService.this, driveManager);
                 final SecureVaultManager vaultManager = new SecureVaultManager(DownloadService.this);
 
-                // Destination file inside local .vault container
-                final File vaultFile = vaultManager.createVaultFile(fileNameFromServer);
-
                 new Thread(new Runnable() {
                     @Override
                     public void run() {
                         try {
-                            String originalFileName = reconstructionEngine.executeReconstruction(encryptedManifestId, secretNumber, vaultFile, new ReconstructionEngine.ProgressListener() {
-                                @Override
-                                public void onProgress(int progress, int max, long bytesProcessed) {
-                                    updateNotification("Reconstructing " + fileNameFromServer + "... " + progress + "%", true, progress, max);
-                                    broadcastStatus("Reconstructing...",
-                                            String.format(Locale.US, "%s / %s",
-                                                    Formatter.formatFileSize(getApplicationContext(), bytesProcessed),
-                                                    Formatter.formatFileSize(getApplicationContext(), originalFilesize)),
-                                            progress, max, bytesProcessed);
+                            List<Map<String, Object>> fileItems = (List<Map<String, Object>>) documentSnapshot.get("fileItems");
+                            String lastDownloadedFileName = null;
+                            String lastDownloadedVaultPath = null;
+
+                            if (fileItems != null && !fileItems.isEmpty()) {
+                                int totalBatchFiles = fileItems.size();
+
+                                for (int i = 0; i < totalBatchFiles; i++) {
+                                    Map<String, Object> itemMap = fileItems.get(i);
+                                    final String manifestId = (String) itemMap.get("encryptedManifestId");
+                                    final long filesize = ((Number) itemMap.get("filesize")).longValue();
+                                    final String fileName = (String) itemMap.get("originalFilename");
+
+                                    final int currentFileIndex = i + 1;
+                                    final File vaultFile = vaultManager.createVaultFile(fileName);
+
+                                    String reconstructedName = reconstructionEngine.executeReconstruction(manifestId, secretNumber, vaultFile, new ReconstructionEngine.ProgressListener() {
+                                        @Override
+                                        public void onProgress(int progress, int max, long bytesProcessed) {
+                                            updateNotification("Reconstructing (" + currentFileIndex + "/" + totalBatchFiles + "): " + fileName + "... " + progress + "%", true, progress, max);
+                                            broadcastStatus("Reconstructing (" + currentFileIndex + "/" + totalBatchFiles + ")",
+                                                    String.format(Locale.US, "%s / %s",
+                                                            Formatter.formatFileSize(getApplicationContext(), bytesProcessed),
+                                                            Formatter.formatFileSize(getApplicationContext(), filesize)),
+                                                    progress, max, bytesProcessed);
+                                        }
+
+                                        @Override
+                                        public void onStatusUpdate(String minorStatus) {
+                                            updateNotification(minorStatus, true, 0, 0);
+                                            broadcastStatus("Reconstructing (" + currentFileIndex + "/" + totalBatchFiles + ")", minorStatus, -1, -1, -1);
+                                        }
+                                    });
+
+                                    lastDownloadedFileName = reconstructedName;
+                                    lastDownloadedVaultPath = vaultFile.getAbsolutePath();
+                                }
+                            } else {
+                                // Single file fallback
+                                final String encryptedManifestId = documentSnapshot.getString("encryptedManifestId");
+                                final long originalFilesize = documentSnapshot.getLong("filesize");
+                                final String fileNameFromServer = documentSnapshot.getString("originalFilename");
+
+                                if (encryptedManifestId == null) {
+                                    broadcastError("Error: Incomplete transfer details from server.");
+                                    stopServiceAndCleanup(null, startId, currentListener, docId);
+                                    return;
                                 }
 
-                                @Override
-                                public void onStatusUpdate(String minorStatus) {
-                                    updateNotification(minorStatus, true, 0, 0);
-                                    broadcastStatus("Reconstructing...", minorStatus, -1, -1, -1);
-                                }
-                            });
+                                final File vaultFile = vaultManager.createVaultFile(fileNameFromServer);
 
-                            // Reconstruction successful -> update document status on Client database
+                                lastDownloadedFileName = reconstructionEngine.executeReconstruction(encryptedManifestId, secretNumber, vaultFile, new ReconstructionEngine.ProgressListener() {
+                                    @Override
+                                    public void onProgress(int progress, int max, long bytesProcessed) {
+                                        updateNotification("Reconstructing " + fileNameFromServer + "... " + progress + "%", true, progress, max);
+                                        broadcastStatus("Reconstructing...",
+                                                String.format(Locale.US, "%s / %s",
+                                                        Formatter.formatFileSize(getApplicationContext(), bytesProcessed),
+                                                        Formatter.formatFileSize(getApplicationContext(), originalFilesize)),
+                                                progress, max, bytesProcessed);
+                                    }
+
+                                    @Override
+                                    public void onStatusUpdate(String minorStatus) {
+                                        updateNotification(minorStatus, true, 0, 0);
+                                        broadcastStatus("Reconstructing...", minorStatus, -1, -1, -1);
+                                    }
+                                });
+
+                                lastDownloadedVaultPath = vaultFile.getAbsolutePath();
+                            }
+
+                            // Update Firestore document status to complete
                             docRef.update("status", "complete");
-                            updateNotification("Download Complete: " + originalFileName, false, 100, 100);
+                            updateNotification("Download Complete: " + lastDownloadedFileName, false, 100, 100);
                             
-                            // Broadcast completion to UI
-                            broadcastComplete(originalFileName, vaultFile.getAbsolutePath());
-                            
+                            broadcastComplete(lastDownloadedFileName, lastDownloadedVaultPath);
                             stopServiceAndCleanup(null, startId, currentListener, docId);
 
                         } catch (Exception e) {
                             docRef.update("status", "error");
-                            
                             String exactErrorLog = getStackTraceAsString(e);
                             broadcastError("FATAL RECONSTRUCTION ERROR:\n\n" + exactErrorLog);
                             stopServiceAndCleanup(null, startId, currentListener, docId);
