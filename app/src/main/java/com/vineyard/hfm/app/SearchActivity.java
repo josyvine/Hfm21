@@ -395,7 +395,6 @@ public class SearchActivity extends Activity implements SearchAdapter.OnItemClic
                 MediaStore.Files.FileColumns.DATA
             };
 
-            // FIX: Standard sort order without invalid LIMIT/OFFSET string syntax that breaks Vivo ContentResolver
             String sortOrder = MediaStore.Files.FileColumns.DATE_MODIFIED + " DESC";
 
             Cursor cursor = getContentResolver().query(queryUri, projection, selection.toString(),
@@ -449,7 +448,7 @@ public class SearchActivity extends Activity implements SearchAdapter.OnItemClic
                 }
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error performing MediaStore query on Vivo device", e);
+            Log.e(TAG, "Error performing MediaStore query", e);
         }
         
         return results;
@@ -771,7 +770,6 @@ public class SearchActivity extends Activity implements SearchAdapter.OnItemClic
 
                 final Set<String> folderSet = new HashSet<>();
                 Uri uri = MediaStore.Files.getContentUri("external");
-                // FIX: Standard projection array without DISTINCT syntax
                 String[] projection = { MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME };
                 String selection = MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME + " LIKE ?";
                 String[] selectionArgs = {lastWord + "%"};
@@ -817,7 +815,6 @@ public class SearchActivity extends Activity implements SearchAdapter.OnItemClic
     }
 
     private void initiateDeletionProcess() {
-        // Execute on Parallel Thread Pool to prevent global AsyncTask queue starvation
         new PreDeletionCheckTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
@@ -838,11 +835,9 @@ public class SearchActivity extends Activity implements SearchAdapter.OnItemClic
             List<SearchResult> selectedResults = new ArrayList<>();
             boolean requiresSdCardPermission = false;
             
-            // Fast check: query SD Card path and permission ONCE before starting loops
             String sdCardPath = StorageUtils.getSdCardPath(SearchActivity.this);
             boolean hasSdPermission = StorageUtils.hasSdCardPermission(SearchActivity.this);
 
-            // Step 1: Gather ONLY user-selected items
             for (Object item : masterList) {
                 if (item instanceof SearchResult) {
                     SearchResult result = (SearchResult) item;
@@ -857,7 +852,6 @@ public class SearchActivity extends Activity implements SearchAdapter.OnItemClic
 
             if (selectedResults.isEmpty()) return null;
 
-            // Step 2: Extract parent directories ONLY for selected items to build targeted directory map
             Set<String> selectedParentPaths = new HashSet<>();
             for (SearchResult selected : selectedResults) {
                 String path = selected.getPath();
@@ -889,7 +883,6 @@ public class SearchActivity extends Activity implements SearchAdapter.OnItemClic
                 }
             }
 
-            // Step 3: Match sibling files in parallel memory map
             Set<SearchResult> masterDeleteSet = new HashSet<>();
             for (SearchResult selected : selectedResults) {
                 masterDeleteSet.add(selected);
@@ -1368,14 +1361,11 @@ public class SearchActivity extends Activity implements SearchAdapter.OnItemClic
             }
         });
 
+        // GLITCH 4 FIX: Support multi-file batch drop directly from search selection
         sendToDropZoneButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (selectedFiles.size() == 1) {
-                    showSendToDropDialog(selectedFiles.get(0));
-                } else {
-                    Toast.makeText(SearchActivity.this, "HFM Drop currently supports sending a single file at a time.", Toast.LENGTH_LONG).show();
-                }
+                showSendToDropDialog(selectedFiles);
                 dialog.dismiss();
             }
         });
@@ -1514,11 +1504,15 @@ public class SearchActivity extends Activity implements SearchAdapter.OnItemClic
         return null;
     }
 
-    private void showSendToDropDialog(final File fileToSend) {
+    private void showSendToDropDialog(final List<File> filesToSend) {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         LayoutInflater inflater = this.getLayoutInflater();
         View dialogView = inflater.inflate(R.layout.dialog_send_drop, null);
-        final EditText receiverUsernameInput = dialogView.findViewById(R.id.edit_text_receiver_username);
+        
+        final AutoCompleteTextView receiverUsernameInput = dialogView.findViewById(R.id.edit_text_receiver_username);
+
+        // GLITCH 3 FIX: Bind Auto-Complete Dropdown using EncryptionHelper
+        EncryptionHelper.getInstance(this).setupAutoComplete(this, receiverUsernameInput);
 
         builder.setView(dialogView)
                 .setPositiveButton("Send", new DialogInterface.OnClickListener() {
@@ -1528,7 +1522,9 @@ public class SearchActivity extends Activity implements SearchAdapter.OnItemClic
                         if (receiverUsername.isEmpty()) {
                             Toast.makeText(SearchActivity.this, "Receiver username cannot be empty.", Toast.LENGTH_SHORT).show();
                         } else {
-                            showSenderWarningDialog(receiverUsername, fileToSend);
+                            // GLITCH 3 FIX: Save receiver username to local preferences
+                            EncryptionHelper.getInstance(SearchActivity.this).saveReceiverUsername(receiverUsername);
+                            showSenderWarningDialog(receiverUsername, filesToSend);
                         }
                     }
                 })
@@ -1536,7 +1532,13 @@ public class SearchActivity extends Activity implements SearchAdapter.OnItemClic
         builder.create().show();
     }
 
-    private void showSenderWarningDialog(final String receiverUsername, final File fileToSend) {
+    private void showSendToDropDialog(final File fileToSend) {
+        List<File> singleFileList = new ArrayList<>();
+        singleFileList.add(fileToSend);
+        showSendToDropDialog(singleFileList);
+    }
+
+    private void showSenderWarningDialog(final String receiverUsername, final List<File> filesToSend) {
         final String secretNumber = generateSecretNumber();
 
         new AlertDialog.Builder(this)
@@ -1547,21 +1549,38 @@ public class SearchActivity extends Activity implements SearchAdapter.OnItemClic
             .setPositiveButton("I Understand, Start Sending", new DialogInterface.OnClickListener() {
                 @Override
                 public void onClick(DialogInterface dialog, int which) {
-                    startSenderService(receiverUsername, secretNumber, fileToSend);
+                    startSenderService(receiverUsername, secretNumber, filesToSend);
                 }
             })
             .setNegativeButton("Cancel", null)
             .show();
     }
 
-    private void startSenderService(String receiverUsername, String secretNumber, File fileToSend) {
-        if (fileToSend == null || !fileToSend.exists()) {
-            Toast.makeText(this, "Error: File to send does not exist.", Toast.LENGTH_SHORT).show();
+    private void startSenderService(String receiverUsername, String secretNumber, List<File> filesToSend) {
+        if (filesToSend == null || filesToSend.isEmpty()) {
+            Toast.makeText(this, "Error: No valid files selected to send.", Toast.LENGTH_SHORT).show();
             return;
         }
+
+        ArrayList<String> filePaths = new ArrayList<>();
+        for (File file : filesToSend) {
+            if (file != null && file.exists()) {
+                filePaths.add(file.getAbsolutePath());
+            }
+        }
+
+        if (filePaths.isEmpty()) {
+            Toast.makeText(this, "Error: Selected files do not exist on disk.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // GLITCH 3 FIX: Save username to history
+        EncryptionHelper.getInstance(this).saveReceiverUsername(receiverUsername);
+
+        // GLITCH 4 FIX: Pass full list of files to SenderService in a single batch
         Intent intent = new Intent(this, SenderService.class);
         intent.setAction(SenderService.ACTION_START_SEND);
-        intent.putExtra(SenderService.EXTRA_FILE_PATH, fileToSend.getAbsolutePath());
+        intent.putStringArrayListExtra(SenderService.EXTRA_FILE_PATHS, filePaths);
         intent.putExtra(SenderService.EXTRA_RECEIVER_USERNAME, receiverUsername);
         intent.putExtra(SenderService.EXTRA_SECRET_NUMBER, secretNumber);
         ContextCompat.startForegroundService(this, intent);
@@ -1596,7 +1615,6 @@ public class SearchActivity extends Activity implements SearchAdapter.OnItemClic
             return;
         }
 
-        // Execute on Parallel Thread Pool to prevent global AsyncTask queue starvation
         new AsyncTask<Void, Void, Intent>() {
             @Override
             protected Intent doInBackground(Void... voids) {
