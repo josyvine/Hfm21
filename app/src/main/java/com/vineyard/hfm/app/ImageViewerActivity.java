@@ -19,6 +19,7 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.webkit.MimeTypeMap;
+import android.widget.AutoCompleteTextView;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
@@ -269,7 +270,10 @@ public class ImageViewerActivity extends Activity {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         LayoutInflater inflater = this.getLayoutInflater();
         View dialogView = inflater.inflate(R.layout.dialog_send_drop, null);
-        final EditText receiverUsernameInput = dialogView.findViewById(R.id.edit_text_receiver_username);
+        final AutoCompleteTextView receiverUsernameInput = dialogView.findViewById(R.id.edit_text_receiver_username);
+
+        // GLITCH 3 FIX: Bind Auto-Complete Dropdown using EncryptionHelper
+        EncryptionHelper.getInstance(this).setupAutoComplete(this, receiverUsernameInput);
 
         builder.setView(dialogView)
                 .setPositiveButton("Send", new DialogInterface.OnClickListener() {
@@ -279,6 +283,8 @@ public class ImageViewerActivity extends Activity {
                         if (receiverUsername.isEmpty()) {
                             Toast.makeText(ImageViewerActivity.this, "Receiver username cannot be empty.", Toast.LENGTH_SHORT).show();
                         } else {
+                            // GLITCH 3 FIX: Save receiver username to local preferences
+                            EncryptionHelper.getInstance(ImageViewerActivity.this).saveReceiverUsername(receiverUsername);
                             showSenderWarningDialog(receiverUsername, fileToSend);
                         }
                     }
@@ -310,9 +316,17 @@ public class ImageViewerActivity extends Activity {
             Toast.makeText(this, "Error: File to send does not exist.", Toast.LENGTH_SHORT).show();
             return;
         }
+
+        // GLITCH 3 FIX: Save username to history
+        EncryptionHelper.getInstance(this).saveReceiverUsername(receiverUsername);
+
+        ArrayList<String> filePaths = new ArrayList<>();
+        filePaths.add(fileToSend.getAbsolutePath());
+
+        // GLITCH 4 FIX: Pass file paths via EXTRA_FILE_PATHS
         Intent intent = new Intent(this, SenderService.class);
         intent.setAction(SenderService.ACTION_START_SEND);
-        intent.putExtra(SenderService.EXTRA_FILE_PATH, fileToSend.getAbsolutePath());
+        intent.putStringArrayListExtra(SenderService.EXTRA_FILE_PATHS, filePaths);
         intent.putExtra(SenderService.EXTRA_RECEIVER_USERNAME, receiverUsername);
         intent.putExtra(SenderService.EXTRA_SECRET_NUMBER, secretNumber);
         ContextCompat.startForegroundService(this, intent);
@@ -420,7 +434,6 @@ public class ImageViewerActivity extends Activity {
             Toast.makeText(this, "File moved to Recycle Bin.", Toast.LENGTH_SHORT).show();
             mFileDeleted = true;
 
-            // Immediately purge source path from MediaStore DB to fix Glitch 1
             MediaStoreUtils.purgePathFromMediaStore(this, sourceFile.getAbsolutePath());
             if (destFile != null) {
                 MediaStoreUtils.scanNewPath(this, destFile);
