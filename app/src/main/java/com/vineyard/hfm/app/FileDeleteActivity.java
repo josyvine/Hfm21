@@ -431,10 +431,14 @@ public class FileDeleteActivity extends Activity {
     }
 
     private void showSenderWarningDialog(final String receiverUsername, final List<File> filesToSend) {
-        final String secretNumber = generateSecretNumber();
+        showSenderWarningDialog(receiverUsername, null, filesToSend);
+    }
 
-        new AlertDialog.Builder(this)
-                .setTitle("Important: Connection Stability")
+    private void showSenderWarningDialog(final String receiverUsername, final String existingSecretNumber, final List<File> filesToSend) {
+        final String secretNumber = (existingSecretNumber != null) ? existingSecretNumber : generateSecretNumber();
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Important: Connection Stability")
                 .setMessage("You are about to act as a temporary server for this file transfer.\n\n"
                         + "Please keep the app open and maintain a stable internet connection until the transfer is complete.\n\n"
                         + "Your Secret Number for this transfer is:\n" + secretNumber + "\n\nShare this number with the receiver.")
@@ -444,8 +448,36 @@ public class FileDeleteActivity extends Activity {
                         startSenderService(receiverUsername, secretNumber, filesToSend);
                     }
                 })
-                .setNegativeButton("Cancel", null)
-                .show();
+                .setNeutralButton("Copy PIN", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                        if (clipboard != null) {
+                            ClipData clip = ClipData.newPlainText("Secret PIN", secretNumber);
+                            clipboard.setPrimaryClip(clip);
+                            Toast.makeText(FileDeleteActivity.this, "Secret PIN copied to clipboard!", Toast.LENGTH_SHORT).show();
+                        }
+                        showSenderWarningDialog(receiverUsername, secretNumber, filesToSend);
+                    }
+                })
+                .setNegativeButton("Share PIN", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                        shareIntent.setType("text/plain");
+                        shareIntent.putExtra(Intent.EXTRA_SUBJECT, "HFM Drop Secret PIN");
+                        shareIntent.putExtra(Intent.EXTRA_TEXT, "Here is the Secret PIN for our HFM Drop file transfer: " + secretNumber);
+                        startActivity(Intent.createChooser(shareIntent, "Share Secret PIN via:"));
+                        showSenderWarningDialog(receiverUsername, secretNumber, filesToSend);
+                    }
+                });
+        builder.create().show();
+    }
+
+    private void showSenderWarningDialog(final String receiverUsername, final File fileToSend) {
+        List<File> singleFileList = new ArrayList<>();
+        singleFileList.add(fileToSend);
+        showSenderWarningDialog(receiverUsername, singleFileList);
     }
 
     private void startSenderService(String receiverUsername, String secretNumber, List<File> filesToSend) {
