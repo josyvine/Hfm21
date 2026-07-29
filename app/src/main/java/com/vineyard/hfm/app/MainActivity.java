@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -630,8 +631,8 @@ public class MainActivity extends Activity {
                                 }
                             }
                         })
-                        .setNegativeButton("Cancel", null);
-                    builder.create().show();
+                        .setNegativeButton("Cancel", null)
+                        .show();
                 }
             });
         }
