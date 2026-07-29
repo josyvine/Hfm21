@@ -5,7 +5,6 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -668,11 +667,11 @@ public class MainActivity extends Activity {
                                     Toast.makeText(MainActivity.this, "PIN must be at least 4 digits.", Toast.LENGTH_SHORT).show();
                                 } else {
                                     prefs.edit().putString("stealth_pin", newPin).apply();
-                                    Toast.makeText(MainActivity.this, "Stealth PIN Saved: " + newPin + "\nDial code on phone dialer to restore.", Toast.LENGTH_LONG).show();
+                                    Toast.makeText(MainActivity.this, "Stealth PIN Saved: " + newPin + "\nDial code on phone dialer to manage slider options.", Toast.LENGTH_LONG).show();
                                 }
                             }
                         })
-                        .setNeutralButton("Hide App Now", new DialogInterface.OnClickListener() {
+                        .setNeutralButton("Hide Slider Icons Now", new DialogInterface.OnClickListener() {
                             @Override
                             public void onClick(DialogInterface dialog, int which) {
                                 String newPin = pinInput.getText().toString().trim();
@@ -683,13 +682,7 @@ public class MainActivity extends Activity {
                                 prefs.edit().putString("stealth_pin", newPin)
                                             .putBoolean("is_stealth_hidden", true).apply();
 
-                                ComponentName componentName = new ComponentName(MainActivity.this, MainActivity.class);
-                                getPackageManager().setComponentEnabledSetting(
-                                        componentName,
-                                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                                        PackageManager.DONT_KILL_APP
-                                );
-                                Toast.makeText(MainActivity.this, "App Icon & Slider Options Hidden!\nDial " + newPin + " or *#" + newPin + "# to restore.", Toast.LENGTH_LONG).show();
+                                Toast.makeText(MainActivity.this, "Slider Icons Hidden!\nDial " + newPin + " or *#" + newPin + "# in phone dialer to manage.", Toast.LENGTH_LONG).show();
 
                                 webView.loadUrl("file:///android_asset/webview-app.html");
                             }
