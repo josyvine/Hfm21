@@ -24,6 +24,7 @@ public class VaultAdapter extends RecyclerView.Adapter<VaultAdapter.VaultViewHol
 
     public interface OnItemClickListener {
         void onItemClick(File file);
+        void onItemLongClick(File file); // ADDED: Long-click listener for deletion
     }
 
     public VaultAdapter(Context context, List<File> fileList, OnItemClickListener listener) {
@@ -69,12 +70,24 @@ public class VaultAdapter extends RecyclerView.Adapter<VaultAdapter.VaultViewHol
         // Apply theme-based tint for visibility
         holder.fileIcon.setColorFilter(contrastColor, PorterDuff.Mode.SRC_IN);
 
+        // Tap to open/play file
         holder.itemView.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 if (listener != null) {
                     listener.onItemClick(file);
                 }
+            }
+        });
+
+        // Long press to trigger options/deletion menu
+        holder.itemView.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override
+            public boolean onLongClick(View v) {
+                if (listener != null) {
+                    listener.onItemLongClick(file);
+                }
+                return true; // Consume long-click event
             }
         });
     }
