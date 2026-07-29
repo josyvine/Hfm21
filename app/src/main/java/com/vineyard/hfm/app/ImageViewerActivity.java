@@ -265,7 +265,7 @@ public class ImageViewerActivity extends Activity {
 
         dialog.show();
     }
-    
+
     private void showSendToDropDialog(final File fileToSend) {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         LayoutInflater inflater = this.getLayoutInflater();
@@ -292,23 +292,49 @@ public class ImageViewerActivity extends Activity {
                 .setNegativeButton("Cancel", null);
         builder.create().show();
     }
-    
-    private void showSenderWarningDialog(final String receiverUsername, final File fileToSend) {
-        final String secretNumber = generateSecretNumber();
 
-        new AlertDialog.Builder(this)
-            .setTitle("Important: Connection Stability")
-            .setMessage("You are about to act as a temporary server for this file transfer.\n\n"
-                    + "Please keep the app open and maintain a stable internet connection until the transfer is complete.\n\n"
-                    + "Your Secret Number for this transfer is:\n" + secretNumber + "\n\nShare this number with the receiver.")
-            .setPositiveButton("I Understand, Start Sending", new DialogInterface.OnClickListener() {
-                @Override
-                public void onClick(DialogInterface dialog, int which) {
-                    startSenderService(receiverUsername, secretNumber, fileToSend);
-                }
-            })
-            .setNegativeButton("Cancel", null)
-            .show();
+    private void showSenderWarningDialog(final String receiverUsername, final File fileToSend) {
+        showSenderWarningDialog(receiverUsername, null, fileToSend);
+    }
+
+    private void showSenderWarningDialog(final String receiverUsername, final String existingSecretNumber, final File fileToSend) {
+        final String secretNumber = (existingSecretNumber != null) ? existingSecretNumber : generateSecretNumber();
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Important: Connection Stability")
+                .setMessage("You are about to act as a temporary server for this file transfer.\n\n"
+                        + "Please keep the app open and maintain a stable internet connection until the transfer is complete.\n\n"
+                        + "Your Secret Number for this transfer is:\n" + secretNumber + "\n\nShare this number with the receiver.")
+                .setPositiveButton("I Understand, Start Sending", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        startSenderService(receiverUsername, secretNumber, fileToSend);
+                    }
+                })
+                .setNeutralButton("Copy PIN", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                        if (clipboard != null) {
+                            ClipData clip = ClipData.newPlainText("Secret PIN", secretNumber);
+                            clipboard.setPrimaryClip(clip);
+                            Toast.makeText(ImageViewerActivity.this, "Secret PIN copied to clipboard!", Toast.LENGTH_SHORT).show();
+                        }
+                        showSenderWarningDialog(receiverUsername, secretNumber, fileToSend);
+                    }
+                })
+                .setNegativeButton("Share PIN", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                        shareIntent.setType("text/plain");
+                        shareIntent.putExtra(Intent.EXTRA_SUBJECT, "HFM Drop Secret PIN");
+                        shareIntent.putExtra(Intent.EXTRA_TEXT, "Here is the Secret PIN for our HFM Drop file transfer: " + secretNumber);
+                        startActivity(Intent.createChooser(shareIntent, "Share Secret PIN via:"));
+                        showSenderWarningDialog(receiverUsername, secretNumber, fileToSend);
+                    }
+                });
+        builder.create().show();
     }
 
     private void startSenderService(String receiverUsername, String secretNumber, File fileToSend) {
