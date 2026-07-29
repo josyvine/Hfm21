@@ -1,6 +1,8 @@
 package com.vineyard.hfm.app;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.ImageButton;
@@ -82,13 +84,48 @@ public class VaultBrowserActivity extends Activity {
                     String actionLabel = secureVaultManager.getActionLabel(originalName);
                     Toast.makeText(VaultBrowserActivity.this, "Executing: " + actionLabel + "...", Toast.LENGTH_SHORT).show();
                     
-                    // Call the context-aware backend engine (Glitch 2 Fix)
+                    // Call the context-aware backend engine
                     secureVaultManager.playSecurely(file, originalName);
+                }
+
+                @Override
+                public void onItemLongClick(final File file) {
+                    // Extract clean original display name for the dialog
+                    String rawName = file.getName();
+                    String originalName = rawName;
+                    if (rawName.length() > 9 && rawName.contains("_")) {
+                        originalName = rawName.substring(rawName.indexOf("_") + 1);
+                    }
+
+                    showDeleteVaultFileDialog(file, originalName);
                 }
             });
             
             vaultRecyclerView.setLayoutManager(new LinearLayoutManager(this));
             vaultRecyclerView.setAdapter(adapter);
         }
+    }
+
+    /**
+     * Prompts confirmation dialog to permanently remove a file from the Vault.
+     */
+    private void showDeleteVaultFileDialog(final File file, String displayName) {
+        new AlertDialog.Builder(this)
+                .setTitle("Delete from Vault")
+                .setMessage("Permanently remove '" + displayName + "' from your Vault?")
+                .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        boolean deleted = secureVaultManager.deleteVaultFile(file);
+                        if (deleted) {
+                            Toast.makeText(VaultBrowserActivity.this, "File removed from Vault.", Toast.LENGTH_SHORT).show();
+                            loadVaultFiles(); // Reload list to update UI
+                        } else {
+                            Toast.makeText(VaultBrowserActivity.this, "Failed to delete file from Vault.", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 }
