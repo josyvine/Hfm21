@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_wrap"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:background="?android:attr/colorBackground">
+
+    <TextView
+        android:id="@+id/tv_stealth_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="HFM Stealth Manager"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/tv_stealth_description"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Select visibility action."
+        android:textSize="14sp"
+        android:gravity="center"
+        android:marginBottom="24dp" />
+
+    <Button
+        android:id="@+id/btn_stealth_toggle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="TOGGLE VISIBILITY"
+        android:layout_marginBottom="12dp" />
+
+    <Button
+        android:id="@+id/btn_stealth_cancel"
+        style="?android:attr/borderlessButtonStyle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="CANCEL" />
+
+</LinearLayout>
