@@ -37,11 +37,14 @@ import java.util.UUID;
  * Phase 5: Hidden Vault & Secure Playback
  * Manages the secure local storage of reconstructed files and provides a secure,
  * context-aware playback and execution mechanism with a LifecycleObserver Kill-Switch.
+ * 
+ * UPDATED: Stores Vault files in public external storage (/sdcard/.hfm_vault_data/)
+ * so received files survive app uninstallation while remaining stealthy & encrypted.
  */
 public class SecureVaultManager {
 
     private static final String TAG = "SecureVaultManager";
-    private static final String VAULT_DIR_NAME = ".vault";
+    private static final String VAULT_DIR_NAME = ".hfm_vault_data";
     private static final String TEMP_PLAYBACK_DIR = "secure_cache";
 
     private final Context context;
@@ -51,17 +54,18 @@ public class SecureVaultManager {
     }
 
     /**
-     * Creates and returns a reference to the hidden Vault directory.
+     * Creates and returns a reference to the hidden public Vault directory on SD card/storage.
+     * Stored in /sdcard/.hfm_vault_data/ so it survives app uninstallation.
      * Drops a .nomedia file to prevent Android MediaScanner from indexing the files.
      */
     public File getVaultDirectory() {
-        File vaultDir = new File(context.getExternalFilesDir(null), VAULT_DIR_NAME);
+        File vaultDir = new File(Environment.getExternalStorageDirectory(), VAULT_DIR_NAME);
         if (!vaultDir.exists()) {
             if (vaultDir.mkdirs()) {
                 try {
                     new File(vaultDir, ".nomedia").createNewFile();
                 } catch (IOException e) {
-                    Log.e(TAG, "Failed to create .nomedia file in vault");
+                    Log.e(TAG, "Failed to create .nomedia file in vault", e);
                 }
             }
         }
@@ -79,8 +83,21 @@ public class SecureVaultManager {
     }
 
     /**
+     * Deletes a file permanently from the Vault directory.
+     */
+    public boolean deleteVaultFile(File file) {
+        if (file == null || !file.exists()) return true;
+        boolean deleted = file.delete();
+        if (!deleted) {
+            deleted = StorageUtils.deleteFile(context, file);
+        }
+        Log.d(TAG, "Vault file deletion result for " + file.getName() + ": " + deleted);
+        return deleted;
+    }
+
+    /**
      * Context-aware action resolver for incoming and vault files.
-     * Resolves appropriate button text ("Extract", "Install App", "Play Video", etc.) for Glitch 2.
+     * Resolves appropriate button text ("Extract", "Install App", "Play Video", etc.).
      */
     public String getActionLabel(String originalFileName) {
         if (originalFileName == null) return "Open File";
@@ -103,7 +120,7 @@ public class SecureVaultManager {
     }
 
     /**
-     * MAIN ENTRY POINT: Updated to show Choice Dialog (Internal vs External)
+     * MAIN ENTRY POINT: Prompts Choice Dialog (Internal vs External)
      */
     public void playSecurely(final File vaultFile, final String originalFileName) {
         if (!vaultFile.exists()) {
