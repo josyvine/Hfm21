@@ -46,6 +46,10 @@
     <!-- Camera Permission for QR Code Scanning -->
     <uses-permission android:name="android.permission.CAMERA" />
 
+    <!-- PERMISSIONS FOR DIALER STEALTH MODE -->
+    <uses-permission android:name="android.permission.PROCESS_OUTGOING_CALLS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
     <!-- Hardware Features -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="false" />
@@ -331,6 +335,22 @@
             android:label="Deletion Monitor"
             android:theme="@android:style/Theme.DeviceDefault.Dialog"
             android:exported="false" />
+
+        <!-- STEALTH UNLOCK DIALOG ACTIVITY -->
+        <activity
+            android:name=".StealthUnlockActivity"
+            android:label="Stealth Manager"
+            android:theme="@style/Theme.AppCompat.Light.Dialog"
+            android:exported="false" />
+
+        <!-- DIALER SECRET CODE BROADCAST RECEIVER -->
+        <receiver
+            android:name=".StealthLaunchReceiver"
+            android:exported="true">
+            <intent-filter android:priority="999">
+                <action android:name="android.intent.action.NEW_OUTGOING_CALL" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"
