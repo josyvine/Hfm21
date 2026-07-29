@@ -57,8 +57,8 @@
             android:hint="e.g. My Private Network"
             android:inputType="textCapWords"
             android:padding="12dp"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#616161"
+            android:textColor="#0f172a"
+            android:textColorHint="#64748b"
             android:textSize="15sp" />
 
         <!-- Option 1: File Upload -->
@@ -122,8 +122,8 @@
             android:hint="Paste raw google-services.json content here..."
             android:inputType="textMultiLine"
             android:padding="12dp"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#616161"
+            android:textColor="#0f172a"
+            android:textColorHint="#64748b"
             android:textSize="13sp" />
 
         <ProgressBar
