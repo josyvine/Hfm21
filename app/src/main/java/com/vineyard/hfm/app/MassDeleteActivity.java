@@ -1253,11 +1253,7 @@ public class MassDeleteActivity extends Activity implements MassDeleteAdapter.On
         sendToDropZoneButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (selectedFiles.size() == 1) {
-                    showSendToDropDialog(selectedFiles.get(0));
-                } else {
-                    Toast.makeText(MassDeleteActivity.this, "HFM Drop currently supports sending a single file at a time.", Toast.LENGTH_LONG).show();
-                }
+                showSendToDropDialog(selectedFiles);
                 dialog.dismiss();
             }
         });
@@ -1386,11 +1382,13 @@ public class MassDeleteActivity extends Activity implements MassDeleteAdapter.On
         dialog.show();
     }
 
-    private void showSendToDropDialog(final File fileToSend) {
+    private void showSendToDropDialog(final List<File> filesToSend) {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         LayoutInflater inflater = this.getLayoutInflater();
         View dialogView = inflater.inflate(R.layout.dialog_send_drop, null);
-        final EditText receiverUsernameInput = dialogView.findViewById(R.id.edit_text_receiver_username);
+        final AutoCompleteTextView receiverUsernameInput = dialogView.findViewById(R.id.edit_text_receiver_username);
+
+        EncryptionHelper.getInstance(this).setupAutoComplete(this, receiverUsernameInput);
 
         builder.setView(dialogView)
                 .setPositiveButton("Send", new DialogInterface.OnClickListener() {
@@ -1400,7 +1398,8 @@ public class MassDeleteActivity extends Activity implements MassDeleteAdapter.On
                         if (receiverUsername.isEmpty()) {
                             Toast.makeText(MassDeleteActivity.this, "Receiver username cannot be empty.", Toast.LENGTH_SHORT).show();
                         } else {
-                            showSenderWarningDialog(receiverUsername, fileToSend);
+                            EncryptionHelper.getInstance(MassDeleteActivity.this).saveReceiverUsername(receiverUsername);
+                            showSenderWarningDialog(receiverUsername, filesToSend);
                         }
                     }
                 })
@@ -1408,35 +1407,94 @@ public class MassDeleteActivity extends Activity implements MassDeleteAdapter.On
         builder.create().show();
     }
 
-    private void showSenderWarningDialog(final String receiverUsername, final File fileToSend) {
-        final String secretNumber = generateSecretNumber();
-
-        new AlertDialog.Builder(this)
-            .setTitle("Important: Connection Stability")
-            .setMessage("You are about to act as a temporary server for this file transfer.\n\n"
-                    + "Please keep the app open and maintain a stable internet connection until the transfer is complete.\n\n"
-                    + "Your Secret Number for this transfer is:\n" + secretNumber + "\n\nShare this number with the receiver.")
-            .setPositiveButton("I Understand, Start Sending", new DialogInterface.OnClickListener() {
-                @Override
-                public void onClick(DialogInterface dialog, int which) {
-                    startSenderService(receiverUsername, secretNumber, fileToSend);
-                }
-            })
-            .setNegativeButton("Cancel", null)
-            .show();
+    private void showSendToDropDialog(final File fileToSend) {
+        List<File> singleFileList = new ArrayList<>();
+        singleFileList.add(fileToSend);
+        showSendToDropDialog(singleFileList);
     }
 
-    private void startSenderService(String receiverUsername, String secretNumber, File fileToSend) {
-        if (fileToSend == null || !fileToSend.exists()) {
-            Toast.makeText(this, "Error: File to send does not exist.", Toast.LENGTH_SHORT).show();
+    private void showSenderWarningDialog(final String receiverUsername, final List<File> filesToSend) {
+        showSenderWarningDialog(receiverUsername, null, filesToSend);
+    }
+
+    private void showSenderWarningDialog(final String receiverUsername, final String existingSecretNumber, final List<File> filesToSend) {
+        final String secretNumber = (existingSecretNumber != null) ? existingSecretNumber : generateSecretNumber();
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Important: Connection Stability")
+                .setMessage("You are about to act as a temporary server for this file transfer.\n\n"
+                        + "Please keep the app open and maintain a stable internet connection until the transfer is complete.\n\n"
+                        + "Your Secret Number for this transfer is:\n" + secretNumber + "\n\nShare this number with the receiver.")
+                .setPositiveButton("I Understand, Start Sending", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        startSenderService(receiverUsername, secretNumber, filesToSend);
+                    }
+                })
+                .setNeutralButton("Copy PIN", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                        if (clipboard != null) {
+                            ClipData clip = ClipData.newPlainText("Secret PIN", secretNumber);
+                            clipboard.setPrimaryClip(clip);
+                            Toast.makeText(MassDeleteActivity.this, "Secret PIN copied to clipboard!", Toast.LENGTH_SHORT).show();
+                        }
+                        showSenderWarningDialog(receiverUsername, secretNumber, filesToSend);
+                    }
+                })
+                .setNegativeButton("Share PIN", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                        shareIntent.setType("text/plain");
+                        shareIntent.putExtra(Intent.EXTRA_SUBJECT, "HFM Drop Secret PIN");
+                        shareIntent.putExtra(Intent.EXTRA_TEXT, "Here is the Secret PIN for our HFM Drop file transfer: " + secretNumber);
+                        startActivity(Intent.createChooser(shareIntent, "Share Secret PIN via:"));
+                        showSenderWarningDialog(receiverUsername, secretNumber, filesToSend);
+                    }
+                });
+        builder.create().show();
+    }
+
+    private void showSenderWarningDialog(final String receiverUsername, final File fileToSend) {
+        List<File> singleFileList = new ArrayList<>();
+        singleFileList.add(fileToSend);
+        showSenderWarningDialog(receiverUsername, singleFileList);
+    }
+
+    private void startSenderService(String receiverUsername, String secretNumber, List<File> filesToSend) {
+        if (filesToSend == null || filesToSend.isEmpty()) {
+            Toast.makeText(this, "Error: No files selected to send.", Toast.LENGTH_SHORT).show();
             return;
         }
+
+        ArrayList<String> filePaths = new ArrayList<>();
+        for (File file : filesToSend) {
+            if (file != null && file.exists()) {
+                filePaths.add(file.getAbsolutePath());
+            }
+        }
+
+        if (filePaths.isEmpty()) {
+            Toast.makeText(this, "Error: Selected files do not exist on disk.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        EncryptionHelper.getInstance(this).saveReceiverUsername(receiverUsername);
+
         Intent intent = new Intent(this, SenderService.class);
         intent.setAction(SenderService.ACTION_START_SEND);
-        intent.putExtra(SenderService.EXTRA_FILE_PATH, fileToSend.getAbsolutePath());
+        intent.putStringArrayListExtra(SenderService.EXTRA_FILE_PATHS, filePaths);
         intent.putExtra(SenderService.EXTRA_RECEIVER_USERNAME, receiverUsername);
         intent.putExtra(SenderService.EXTRA_SECRET_NUMBER, secretNumber);
         ContextCompat.startForegroundService(this, intent);
+    }
+
+    private void startSenderService(String receiverUsername, String secretNumber, File fileToSend) {
+        List<File> singleFileList = new ArrayList<>();
+        singleFileList.add(fileToSend);
+        startSenderService(receiverUsername, secretNumber, singleFileList);
     }
 
     private String generateSecretNumber() {
