@@ -5,9 +5,11 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
@@ -629,8 +631,71 @@ public class MainActivity extends Activity {
                                 }
                             }
                         })
-                        .setNegativeButton("Cancel", null)
-                        .show();
+                        .setNegativeButton("Cancel", null);
+                    builder.create().show();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public boolean isStealthHidden() {
+            SharedPreferences prefs = getSharedPreferences("hfm_stealth_prefs", Context.MODE_PRIVATE);
+            return prefs.getBoolean("is_stealth_hidden", false);
+        }
+
+        @JavascriptInterface
+        public void openStealthManager() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    SharedPreferences prefs = getSharedPreferences("hfm_stealth_prefs", Context.MODE_PRIVATE);
+                    String currentPin = prefs.getString("stealth_pin", "");
+
+                    AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+                    LayoutInflater inflater = getLayoutInflater();
+                    View dialogView = inflater.inflate(R.layout.dialog_send_drop, null);
+                    final AutoCompleteTextView pinInput = dialogView.findViewById(R.id.edit_text_receiver_username);
+                    pinInput.setHint("Set 4-digit Secret PIN (e.g. 1234)");
+                    pinInput.setText(currentPin);
+
+                    builder.setTitle("HFM Dialer Stealth Manager")
+                        .setView(dialogView)
+                        .setPositiveButton("Save PIN", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                String newPin = pinInput.getText().toString().trim();
+                                if (newPin.length() < 4) {
+                                    Toast.makeText(MainActivity.this, "PIN must be at least 4 digits.", Toast.LENGTH_SHORT).show();
+                                } else {
+                                    prefs.edit().putString("stealth_pin", newPin).apply();
+                                    Toast.makeText(MainActivity.this, "Stealth PIN Saved: " + newPin + "\nDial code on phone dialer to restore.", Toast.LENGTH_LONG).show();
+                                }
+                            }
+                        })
+                        .setNeutralButton("Hide App Now", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                String newPin = pinInput.getText().toString().trim();
+                                if (newPin.length() < 4) {
+                                    Toast.makeText(MainActivity.this, "Set a 4-digit PIN first.", Toast.LENGTH_SHORT).show();
+                                    return;
+                                }
+                                prefs.edit().putString("stealth_pin", newPin)
+                                            .putBoolean("is_stealth_hidden", true).apply();
+
+                                ComponentName componentName = new ComponentName(MainActivity.this, MainActivity.class);
+                                getPackageManager().setComponentEnabledSetting(
+                                        componentName,
+                                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                                        PackageManager.DONT_KILL_APP
+                                );
+                                Toast.makeText(MainActivity.this, "App Icon & Slider Options Hidden!\nDial " + newPin + " or *#" + newPin + "# to restore.", Toast.LENGTH_LONG).show();
+
+                                webView.loadUrl("file:///android_asset/webview-app.html");
+                            }
+                        })
+                        .setNegativeButton("Cancel", null);
+                    builder.create().show();
                 }
             });
         }
