@@ -1,10 +1,8 @@
 package com.vineyard.hfm.app;
 
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
@@ -20,7 +18,7 @@ import java.util.concurrent.Executor;
 
 /**
  * Biometric gate activity invoked via dialer notification.
- * Enables or disables the launcher component for MainActivity.
+ * Enables or disables the visibility of stealth options inside HFM slider menu.
  */
 public class StealthUnlockActivity extends FragmentActivity {
 
@@ -65,11 +63,11 @@ public class StealthUnlockActivity extends FragmentActivity {
 
     private void updateUI() {
         if (isCurrentlyHidden) {
-            tvDescription.setText("Identity Verified. Would you like to RESTORE (UNHIDE) the HFM App icon and slider options?");
-            btnToggle.setText("UNHIDE APP & SLIDER");
+            tvDescription.setText("Identity Verified. Would you like to RESTORE (UNHIDE) the HFM Hide & Stealth slider options?");
+            btnToggle.setText("UNHIDE SLIDER OPTIONS");
         } else {
-            tvDescription.setText("Identity Verified. Would you like to HIDE the HFM App icon and slider options?");
-            btnToggle.setText("HIDE APP & SLIDER");
+            tvDescription.setText("Identity Verified. Would you like to HIDE the HFM Hide & Stealth slider options?");
+            btnToggle.setText("HIDE SLIDER OPTIONS");
         }
     }
 
@@ -97,39 +95,28 @@ public class StealthUnlockActivity extends FragmentActivity {
 
         promptInfo = new BiometricPrompt.PromptInfo.Builder()
                 .setTitle("HFM Stealth Gate")
-                .setSubtitle("Confirm fingerprint to change visibility")
+                .setSubtitle("Confirm fingerprint to change slider option visibility")
                 .setNegativeButtonText("Cancel")
                 .build();
     }
 
     private void executeToggle() {
-        PackageManager pm = getPackageManager();
-        ComponentName componentName = new ComponentName(this, MainActivity.class);
         SharedPreferences prefs = getSharedPreferences("hfm_stealth_prefs", Context.MODE_PRIVATE);
 
         if (isCurrentlyHidden) {
-            // UNHIDE
-            pm.setComponentEnabledSetting(
-                    componentName,
-                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                    PackageManager.DONT_KILL_APP
-            );
+            // UNHIDE SLIDER OPTIONS
             prefs.edit().putBoolean("is_stealth_hidden", false).apply();
-            Toast.makeText(this, "HFM App Icon and Slider items RESTORED.", Toast.LENGTH_LONG).show();
-
-            Intent intent = new Intent(this, MainActivity.class);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            startActivity(intent);
+            Toast.makeText(this, "HFM Slider Options RESTORED.", Toast.LENGTH_LONG).show();
         } else {
-            // HIDE
-            pm.setComponentEnabledSetting(
-                    componentName,
-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                    PackageManager.DONT_KILL_APP
-            );
+            // HIDE SLIDER OPTIONS
             prefs.edit().putBoolean("is_stealth_hidden", true).apply();
-            Toast.makeText(this, "HFM App Icon and Slider items HIDDEN.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "HFM Slider Options HIDDEN.", Toast.LENGTH_LONG).show();
         }
+
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        startActivity(intent);
+
         finish();
     }
 }
