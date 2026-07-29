@@ -19,6 +19,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="Enter Receiver's Username"
+        android:textColor="#0f172a"
+        android:textColorHint="#64748b"
         android:inputType="text"
         android:maxLines="1"
         android:completionThreshold="1"
