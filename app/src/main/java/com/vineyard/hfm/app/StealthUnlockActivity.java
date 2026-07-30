@@ -1,15 +1,20 @@
 package com.vineyard.hfm.app;
 
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.AutoCompleteTextView;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentActivity;
@@ -17,8 +22,9 @@ import androidx.fragment.app.FragmentActivity;
 import java.util.concurrent.Executor;
 
 /**
- * Biometric gate activity invoked via dialer notification.
- * Enables or disables the visibility of stealth options inside HFM slider menu.
+ * Hybrid gate activity invoked via dialer notification.
+ * Enables or disables the visibility of stealth options inside HFM slider menu
+ * using Fingerprint scan with automatic Stealth PIN fallback.
  */
 public class StealthUnlockActivity extends FragmentActivity {
 
@@ -56,7 +62,17 @@ public class StealthUnlockActivity extends FragmentActivity {
         btnToggle.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                biometricPrompt.authenticate(promptInfo);
+                BiometricManager biometricManager = BiometricManager.from(StealthUnlockActivity.this);
+                int canAuthenticate = biometricManager.canAuthenticate(
+                        BiometricManager.Authenticators.BIOMETRIC_STRONG | BiometricManager.Authenticators.BIOMETRIC_WEAK
+                );
+
+                if (canAuthenticate == BiometricManager.BIOMETRIC_SUCCESS) {
+                    biometricPrompt.authenticate(promptInfo);
+                } else {
+                    // Fingerprint not enrolled or hardware unavailable -> fallback directly to PIN
+                    showPinFallbackDialog();
+                }
             }
         });
     }
@@ -83,21 +99,62 @@ public class StealthUnlockActivity extends FragmentActivity {
             @Override
             public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
                 super.onAuthenticationError(errorCode, errString);
-                Toast.makeText(StealthUnlockActivity.this, "Authentication error: " + errString, Toast.LENGTH_SHORT).show();
+                // On error (e.g. no fingerprints, hardware disabled, or user clicked "Use PIN") -> open PIN dialog
+                showPinFallbackDialog();
             }
 
             @Override
             public void onAuthenticationFailed() {
                 super.onAuthenticationFailed();
-                Toast.makeText(StealthUnlockActivity.this, "Fingerprint not recognized.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(StealthUnlockActivity.this, "Fingerprint not recognized. Try again or tap 'Use PIN'.", Toast.LENGTH_SHORT).show();
             }
         });
 
         promptInfo = new BiometricPrompt.PromptInfo.Builder()
                 .setTitle("HFM Stealth Gate")
-                .setSubtitle("Confirm fingerprint to change slider option visibility")
-                .setNegativeButtonText("Cancel")
+                .setSubtitle("Confirm fingerprint or enter PIN to change slider option visibility")
+                .setNegativeButtonText("Use PIN")
                 .build();
+    }
+
+    /**
+     * Fallback authentication method when fingerprint is unavailable or fails.
+     * Prompts for the 4-digit PIN configured in Stealth Manager.
+     */
+    private void showPinFallbackDialog() {
+        if (isFinishing() || isDestroyed()) return;
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        LayoutInflater inflater = getLayoutInflater();
+        View dialogView = inflater.inflate(R.layout.dialog_send_drop, null);
+        final AutoCompleteTextView pinInput = dialogView.findViewById(R.id.edit_text_receiver_username);
+        pinInput.setHint("Enter 4-digit Stealth PIN");
+
+        builder.setTitle("Enter Stealth Manager PIN")
+                .setView(dialogView)
+                .setPositiveButton("Verify", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        String enteredPin = pinInput.getText().toString().trim();
+                        SharedPreferences prefs = getSharedPreferences("hfm_stealth_prefs", Context.MODE_PRIVATE);
+                        String savedPin = prefs.getString("stealth_pin", "");
+
+                        if (enteredPin.equals(savedPin) && !savedPin.isEmpty()) {
+                            Toast.makeText(StealthUnlockActivity.this, "PIN Verified Successfully!", Toast.LENGTH_SHORT).show();
+                            executeToggle();
+                        } else {
+                            Toast.makeText(StealthUnlockActivity.this, "Incorrect PIN. Access Denied.", Toast.LENGTH_LONG).show();
+                        }
+                    }
+                })
+                .setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        dialog.dismiss();
+                    }
+                });
+
+        builder.create().show();
     }
 
     private void executeToggle() {
